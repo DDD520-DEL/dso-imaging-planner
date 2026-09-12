@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { EXPOSURE_LIMITS, exposureEstimate } from './src/exposure.js';
 import { OPTICS_LIMITS, opticsReport } from './src/optics.js';
+import { SCHEDULE_DEFAULTS, SCHEDULE_LIMITS, scheduleNight } from './src/schedule.js';
 import { BUILTIN_TARGETS, normalizeTarget } from './src/targets.js';
 import { TRACKING_LIMITS, trackingReport } from './src/tracking.js';
 import { VISIBILITY_LIMITS, visibilityPlan } from './src/visibility.js';
@@ -113,6 +114,74 @@ function readTrackingInput(body) {
   };
 }
 
+function readScheduleInput(body) {
+  requireBody(body);
+  if (!Array.isArray(body.targets) || body.targets.length === 0) {
+    throw new ValidationError('至少需要一个拍摄目标');
+  }
+  if (body.targets.length > 12) {
+    throw new ValidationError('单夜排程目标数量不能超过 12 个');
+  }
+
+  const targets = body.targets.map((raw, index) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new ValidationError(`第 ${index + 1} 个目标必须是对象`);
+    }
+    const name =
+      typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 40) : `目标 ${index + 1}`;
+    const priority = numberField(raw, 'priority', {
+      ...SCHEDULE_LIMITS.priority,
+      fallback: SCHEDULE_DEFAULTS.priority
+    });
+    if (!Number.isInteger(priority)) {
+      throw new ValidationError(`「${name}」的优先级必须是 1–9 的整数`);
+    }
+    let filter = '';
+    if (raw.filter !== undefined && raw.filter !== null) {
+      if (typeof raw.filter !== 'string') {
+        throw new ValidationError(`「${name}」的滤镜名称必须是字符串`);
+      }
+      filter = raw.filter.trim().slice(0, 10);
+    }
+    return {
+      name,
+      raHours: numberField(raw, 'raHours', { ...SCHEDULE_LIMITS.targetRaHours, label: `「${name}」赤经（h）` }),
+      decDeg: numberField(raw, 'decDeg', { ...SCHEDULE_LIMITS.declination, label: `「${name}」赤纬（°）` }),
+      exposureMinutes: numberField(raw, 'exposureMinutes', {
+        ...SCHEDULE_LIMITS.exposureMinutes,
+        label: `「${name}」总曝光时长（分钟）`
+      }),
+      priority,
+      filter
+    };
+  });
+
+  return {
+    latitude: numberField(body, 'latitude', SCHEDULE_LIMITS.latitude),
+    dayOfYear: numberField(body, 'dayOfYear', { min: 1, max: 366, label: '一年中的第几天', fallback: 1 }),
+    date: typeof body.date === 'string' && body.date.trim() ? body.date.trim() : new Date().toISOString(),
+    minAltitude: numberField(body, 'minAltitude', {
+      ...SCHEDULE_LIMITS.minAltitude,
+      fallback: SCHEDULE_DEFAULTS.minAltitude
+    }),
+    targetSwitchMinutes: numberField(body, 'targetSwitchMinutes', {
+      ...SCHEDULE_LIMITS.changeOverMinutes,
+      fallback: SCHEDULE_DEFAULTS.targetSwitchMinutes
+    }),
+    filterSwitchMinutes: numberField(body, 'filterSwitchMinutes', {
+      ...SCHEDULE_LIMITS.changeOverMinutes,
+      fallback: SCHEDULE_DEFAULTS.filterSwitchMinutes
+    }),
+    moonThreshold: numberField(body, 'moonThreshold', {
+      min: 0,
+      max: 1,
+      label: '月亮告警阈值',
+      fallback: SCHEDULE_DEFAULTS.moonThreshold
+    }),
+    targets
+  };
+}
+
 async function handleApi(request, response, url, dataFile) {
   const method = request.method ?? 'GET';
   const { pathname } = url;
@@ -176,6 +245,11 @@ async function handleApi(request, response, url, dataFile) {
 
   if (method === 'POST' && pathname === '/api/tracking/check') {
     sendJson(response, 200, trackingReport(readTrackingInput(await readJsonBody(request))));
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/schedule/plan') {
+    sendJson(response, 200, scheduleNight(readScheduleInput(await readJsonBody(request))));
     return;
   }
 

@@ -55,3 +55,12 @@ export function formatPercent(value, digits = 1) {
   if (!Number.isFinite(value)) return '—';
   return `${formatNumber(value * 100, digits)}%`;
 }
+
+/** 以当地午夜为 0 点的分钟偏移（负数为前一日傍晚）转 HH:MM */
+export function formatClockOffset(minutes) {
+  if (!Number.isFinite(minutes)) return '—';
+  const m = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  const hours = Math.floor(m / 60);
+  const mins = m % 60;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+}

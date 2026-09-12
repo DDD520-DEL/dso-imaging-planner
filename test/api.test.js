@@ -158,6 +158,50 @@ test('曝光、可见性与跟踪接口返回计算结果', async () => {
   });
 });
 
+test('排程接口返回时间线与未排入清单，目标参数非法返回 400', async () => {
+  await withServer(async (base) => {
+    const ok = await postJson(base, '/api/schedule/plan', {
+      latitude: 32,
+      dayOfYear: 288,
+      date: '2026-10-15T16:00:00.000Z',
+      targets: [
+        { name: 'M31', raHours: 0.71, decDeg: 41.27, exposureMinutes: 120, priority: 1, filter: 'L' },
+        { name: 'M42', raHours: 5.59, decDeg: -5.39, exposureMinutes: 90, priority: 2 }
+      ]
+    });
+    assert.equal(ok.status, 200);
+    const report = await ok.json();
+    assert.ok(Array.isArray(report.entries));
+    assert.ok(report.entries.length >= 2);
+    assert.deepEqual(report.unscheduled, []);
+    assert.ok(report.utilization.nightMinutes > 0);
+    assert.ok(report.utilization.exposureRatio > 0 && report.utilization.exposureRatio <= 1);
+    assert.equal(report.night.hours, 9.99);
+
+    // 没有天文夜的高纬夏夜：全部目标进未排入清单，不静默丢弃
+    const noNight = await postJson(base, '/api/schedule/plan', {
+      latitude: 70,
+      dayOfYear: 172,
+      date: '2026-06-21T12:00:00.000Z',
+      targets: [{ name: '目标甲', raHours: 12, decDeg: 40, exposureMinutes: 120, priority: 1 }]
+    });
+    assert.equal(noNight.status, 200);
+    const noNightReport = await noNight.json();
+    assert.equal(noNightReport.unscheduled.length, 1);
+    assert.equal(noNightReport.unscheduled[0].reasonCode, 'no-astronomical-night');
+
+    const invalid = await postJson(base, '/api/schedule/plan', {
+      latitude: 32,
+      targets: [{ name: '坏目标', raHours: 99, decDeg: 0, exposureMinutes: 60 }]
+    });
+    assert.equal(invalid.status, 400);
+    assert.match((await invalid.json()).error, /赤经/);
+
+    const empty = await postJson(base, '/api/schedule/plan', { latitude: 32, targets: [] });
+    assert.equal(empty.status, 400);
+  });
+});
+
 test('错误处理：坏 JSON 返回 400，未知接口返回 404', async () => {
   await withServer(async (base) => {
     const brokenJson = await fetch(`${base}/api/tracking/check`, {

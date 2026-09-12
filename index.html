@@ -156,6 +156,29 @@
               </label>
             </div>
           </fieldset>
+
+          <fieldset>
+            <legend>今夜拍摄排程（共用上方观测地纬度与观测日期）</legend>
+            <div class="field-row">
+              <label class="field">
+                <span>换目标开销（分钟）</span>
+                <input id="sched-target-switch" type="number" min="0" max="120" step="1" value="10" />
+              </label>
+              <label class="field">
+                <span>换滤镜开销（分钟）</span>
+                <input id="sched-filter-switch" type="number" min="0" max="120" step="1" value="5" />
+              </label>
+            </div>
+            <div class="sched-rows-head">
+              <span>目标</span><span>赤经 h</span><span>赤纬 °</span><span>总曝光（分）</span><span>优先级</span><span>滤镜</span><span></span>
+            </div>
+            <div id="sched-target-rows" class="sched-rows"></div>
+            <div class="actions">
+              <button id="sched-add-row" type="button" class="ghost">+ 添加目标</button>
+              <button id="sched-run" type="button">排定今夜时间线</button>
+            </div>
+            <p id="sched-message" class="hint"></p>
+          </fieldset>
         </form>
 
         <div class="actions">
@@ -171,6 +194,7 @@
         <article id="exposure-panel" class="card" hidden></article>
         <article id="visibility-panel" class="card" hidden></article>
         <article id="tracking-panel" class="card" hidden></article>
+        <article id="schedule-panel" class="card" hidden></article>
       </section>
 
       <section class="panel panel--library">

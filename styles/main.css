@@ -338,3 +338,287 @@ button.ghost {
 .target-form button {
   grid-column: span 1;
 }
+
+/* ===== 今夜拍摄排程 ===== */
+.sched-rows-head,
+.sched-row {
+  display: grid;
+  grid-template-columns: minmax(84px, 1.7fr) repeat(2, minmax(0, 0.85fr)) minmax(0, 1fr) minmax(0, 0.7fr) minmax(0, 0.95fr) 26px;
+  gap: 6px;
+  align-items: center;
+}
+
+.sched-rows-head {
+  margin: 8px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.sched-row {
+  margin-bottom: 6px;
+}
+
+.sched-row input {
+  padding: 6px 7px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.sched-row__remove {
+  padding: 5px 0;
+  font-size: 12px;
+}
+
+/* 甘特时间线 */
+.sched-track {
+  margin: 12px 0 6px;
+}
+
+.sched-track__axis {
+  position: relative;
+  height: 15px;
+  margin: 0 1px;
+}
+
+.sched-track__tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.sched-track__tick:first-child {
+  transform: translateX(0);
+}
+
+.sched-track__lane {
+  position: relative;
+  height: 34px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: #0d1326;
+  overflow: hidden;
+}
+
+.sched-track__gridline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(150, 160, 200, 0.14);
+}
+
+.sched-seg {
+  position: absolute;
+  top: 3px;
+  bottom: 3px;
+  border-radius: 4px;
+  background: var(--seg-color);
+  outline: 2px solid #0d1326;
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.sched-seg--setup {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 255, 255, 0.06) 0,
+    rgba(255, 255, 255, 0.06) 3px,
+    transparent 3px,
+    transparent 6px
+  );
+  border: 1px dashed var(--seg-color);
+  outline-color: #0d1326;
+}
+
+.sched-seg__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #0b1020;
+  pointer-events: none;
+}
+
+.sched-track__ends {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* 图例 */
+.sched-legend {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12px;
+}
+
+.sched-legend__mins {
+  color: var(--muted);
+}
+
+.dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+/* 利用率条 */
+.sched-util {
+  margin-top: 10px;
+}
+
+.sched-util__bar {
+  display: flex;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #0d1326;
+}
+
+.sched-util__seg {
+  height: 100%;
+}
+
+.sched-util__seg--exposure {
+  background: #3987e5;
+}
+
+.sched-util__seg--setup {
+  background: repeating-linear-gradient(
+    -45deg,
+    #5a6390 0,
+    #5a6390 3px,
+    #434c72 3px,
+    #434c72 6px
+  );
+}
+
+.sched-util__seg--idle {
+  background: transparent;
+}
+
+.dot--exposure {
+  background: #3987e5;
+}
+
+.dot--setup {
+  background: #5a6390;
+}
+
+.dot--idle {
+  background: #222b4a;
+  border: 1px solid var(--border);
+}
+
+.sched-util__legend {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 告警与未排入清单 */
+.sched-warnings {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sched-warnings__item {
+  border-radius: 6px;
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.sched-warnings__item--warn {
+  color: var(--warn);
+  background: rgba(240, 180, 92, 0.1);
+}
+
+.sched-warnings__item--serious {
+  color: var(--bad);
+  background: rgba(242, 112, 122, 0.1);
+}
+
+.sched-unscheduled {
+  margin-top: 10px;
+  border: 1px solid rgba(240, 180, 92, 0.45);
+  background: rgba(240, 180, 92, 0.08);
+  border-radius: 8px;
+  padding: 9px 12px;
+}
+
+.sched-unscheduled h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--warn);
+}
+
+.sched-unscheduled ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.sched-unscheduled__meta {
+  color: var(--muted);
+  margin: 0 6px;
+}
+
+.sched-unscheduled__reason {
+  color: var(--bad);
+}
+
+/* 逐段时间表格 */
+.sched-table-wrap {
+  margin-top: 10px;
+}
+
+.sched-table-wrap summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sched-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.sched-table th,
+.sched-table td {
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+}
+
+.sched-table th {
+  color: var(--muted);
+  font-weight: 400;
+}

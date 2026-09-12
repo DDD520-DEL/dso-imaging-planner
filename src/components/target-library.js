@@ -21,6 +21,7 @@ export function renderTargetList(container, targets, handlers) {
         </div>
         <div class="target-row__actions">
           <button type="button" data-action="use">用于可见性</button>
+          <button type="button" data-action="schedule">加入排程</button>
           ${
             item.source === 'custom'
               ? '<button type="button" class="ghost" data-action="delete">删除</button>'
@@ -37,6 +38,7 @@ export function renderTargetList(container, targets, handlers) {
       const target = all.find((item) => item.id === id);
       if (!target) return;
       if (button.dataset.action === 'use') handlers.onUse(target);
+      else if (button.dataset.action === 'schedule') handlers.onSchedule?.(target);
       else handlers.onDelete(target);
     });
   }

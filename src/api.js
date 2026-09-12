@@ -29,3 +29,4 @@ export const postOptics = (payload) => request('/api/optics/report', { method: '
 export const postExposure = (payload) => request('/api/exposure/estimate', { method: 'POST', body: payload });
 export const postVisibility = (payload) => request('/api/visibility/plan', { method: 'POST', body: payload });
 export const postTracking = (payload) => request('/api/tracking/check', { method: 'POST', body: payload });
+export const postSchedule = (payload) => request('/api/schedule/plan', { method: 'POST', body: payload });
