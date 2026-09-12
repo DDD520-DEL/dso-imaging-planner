@@ -32,7 +32,7 @@ npm test
 - `test/visibility.test.js`：中天高度、可观测时长（含恒显与不可见）、天文夜、午夜高度、月相
 - `test/tracking.test.js`：星点 FWHM 合成、跟踪分级、极轴漂移率与允许极轴误差反解
 - `test/schedule.test.js`：正常排布（优先级、切换开销、互不重叠、利用率）、窗口不足告警与未排入、完全排不下（无天文夜/整夜不升起/总需求超载）
-- `test/train.test.js`：正好合焦、差一点需加转接环（组合与余量）、调焦行程吸收边界、链路超长、接口不匹配、超重、导星采样比分级、结构与字段校验；反推搭配的多解排序、唯一解、相机直连、三类卡点（接口死路/相机接不上/长度凑不到）与参数校验
+- `test/train.test.js`：正好合焦、差一点需加转接环（组合与余量）、调焦行程吸收边界、链路超长、接口不匹配、超重、导星采样比分级、结构与字段校验；反推搭配的多解排序、唯一解、相机直连、三类卡点（接口死路/相机接不上/长度凑不到）、载重评估（部分超重排最后、全部超重、不带重量的向下兼容）与参数校验
 - `test/api.test.js`：启动真实 HTTP 服务，验证健康检查、首页与样式、七类计算接口、目标库增删查重、错误处理与路径越界
 
 ## 目录结构
@@ -72,7 +72,7 @@ test/                        单元测试与接口测试
 | POST | `/api/tracking/check` | 跟踪精度校核 |
 | POST | `/api/schedule/plan` | 今夜拍摄排程，body 为 `latitude`/`dayOfYear`/`date`/`minAltitude`/`targetSwitchMinutes`/`filterSwitchMinutes`/`moonThreshold` 与 `targets[]`（`name`/`raHours`/`decDeg`/`exposureMinutes`/`priority`/`filter`） |
 | POST | `/api/train/check` | 器材齐套校核，body 为 `payloadMarginKg` 与 `items[]`（`type`/`name`/`weightG` 加各类型字段：`ota` 要 `focalLengthMm`/`requiredBackfocusMm`/`threadRear`，`focuser`/`filterWheel`/`adapter` 要 `lengthMm`/`threadFront`/`threadRear`，`camera` 要 `lengthMm`（法兰距）/`pixelSizeUm`/`threadFront`，`guider` 要 `guideFocalLengthMm`/`guidePixelSizeUm`） |
-| POST | `/api/train/solve` | 反推搭配，body 为 `ota`（`requiredBackfocusMm`/`threadRear`）、`camera`（`lengthMm`/`threadFront`）与 `candidates[]`（`type` 限 `focuser`/`filterWheel`/`adapter`，`lengthMm`/`threadFront`/`threadRear`，≤10 件，每件最多用一次） |
+| POST | `/api/train/solve` | 反推搭配，body 为 `ota`（`requiredBackfocusMm`/`threadRear`/`weightG`）、`camera`（`lengthMm`/`threadFront`/`weightG`）、`candidates[]`（`type` 限 `focuser`/`filterWheel`/`adapter`，`lengthMm`/`threadFront`/`threadRear`/`weightG`，≤10 件，每件最多用一次）与可选的 `payloadMarginKg`/`guiderWeightG`；重量字段都可省（默认 0），不给 `payloadMarginKg` 则不评估超重 |
 
 四类计算接口的请求体与页面输入一一对应，参数越界或缺字段返回 `400`，响应体形如 `{ "error": "参数「焦距（mm）」不能小于 50，当前为 10" }`。
 
@@ -91,7 +91,7 @@ test/                        单元测试与接口测试
 - **今夜排程**：以目标中天对齐太阳反照点赤经、可观测时长半宽向前后展开，得到每个目标相对当地午夜的可观测条带，再与当夜天文夜（太阳 −18°，昏影终到晨光始）取交。按优先级（1 最高，同序按输入顺序）逐个接纳目标；每接纳一个就对全部已接纳目标整体重排——按窗口结束时刻升序（最早落没的傍晚目标先占傍晚天空，即带释放/截止时间单机排布的 EDD 次序）选最靠前空档，贪心无解时再用受限回溯兜底，因此**高优先级目标加入时，已排好的低优先级目标会自动让位到更晚的空档**，不会被高优先级目标的早期贪心位置锁死；真正无法共存时只拒绝当前最低优先级目标。每段曝光前计入「换目标开销」，滤镜与时间上紧前一段不同时再加「换滤镜开销」。排不下的目标进入未排入清单（`no-window`/`window-too-short`/`no-capacity`/`no-astronomical-night`/`invalid-target`），`no-capacity` 会报告让位后窗口内的**最长连续空档**与占用该窗口的高优先级目标，而不是笼统地报整段窗口长度。利用率 = 曝光时长 ÷ 天文夜时长，切换与空闲单独列出。时间均为相对当地午夜的时钟时刻（负值为前一日傍晚）。
 - **跟踪校核**：星点 FWHM 由视宁度与跟踪误差的平方和合成（σ→FWHM 系数 2.355）；极轴偏差 `θ` 引起的赤纬漂移率按 `15°/h × sinθ` 近似，并按单帧漂移不超过 1 像素反解允许的极轴误差。
 - **器材齐套**：链路总长 = 调焦座/滤镜轮/转接环占位 + 相机法兰距（主镜为基准面不占长度，导星设备不进光路）；合焦差额 = 要求后截距 − 链路总长，偏差不足 0.5 mm 时两个方向（缺一点或超一点）都由调焦行程吸收、判正好合焦；缺口 ≥ 0.5 mm 时按标准转接环厚度（20/10/5/3/2/1/0.5 mm，可复用）向下精确拼组，拼组后不足 0.5 mm 的余量同样交调焦行程吸收；超出 ≥ 0.5 mm 才判「链路超长」。螺纹接口按「同规格 + 内外互补」逐节匹配（卡口同规格互配），接不上、超长、超重都作为 `problems` 明确列出而不是静默通过。导星采样比 = 导星像素尺度 ÷ 主镜像素尺度，≤2 判「充裕」、≤4 判「可用」、再大判「偏大」。
-- **反推搭配**：中段目标长度 = 要求后截距 − 相机法兰距，在可选件池（每件最多用一次）里搜索「接口逐节匹配且中段长度落在目标 ±0.5 mm 调焦行程容差内」的组合；同一组部件的不同堆叠顺序只保留一套代表。结果按件数从少到多、总长从短到长排序，最多返回 50 套。凑不出时报告搜索最深一段的卡点（第一段接不上主镜 / 某件之后接口死路 / 能接的件加上去都超长 / 长度凑到但相机接口不通），并附长度最接近的组合。
+- **反推搭配**：中段目标长度 = 要求后截距 − 相机法兰距，在可选件池（每件最多用一次）里搜索「接口逐节匹配且中段长度落在目标 ±0.5 mm 调焦行程容差内」的组合；同一组部件的不同堆叠顺序只保留一套代表。结果按件数从少到多、总长从短到长排序，最多返回 50 套；提供载重余量时，每套方案评估整套重量（主镜 + 中段件 + 相机 + 导星设备），超重方案排在最后并标注，全部超重时以 `allOverweight` 明确标出。凑不出时报告搜索最深一段的卡点（第一段接不上主镜 / 某件之后接口死路 / 能接的件加上去都超长 / 长度凑到但相机接口不通），并附长度最接近的组合。
 
 ## 目标库
 

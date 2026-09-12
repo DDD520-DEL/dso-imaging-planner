@@ -359,3 +359,59 @@ test('反推参数校验：缺主镜、可选件类型非法、数量超限都�
   );
   assert.throws(() => readTrainSolveInput({ ota: SOLVE_OTA, camera: SOLVE_CAMERA }), /candidates.*数组/);
 });
+
+// 两套解：{35,20,7.5} 重 800+500+600=1900g，{35,20,5,2.5} 重 800+500+40+30=1370g；两端+导星 3650g
+const WEIGHTED_SOLVE_INPUT = {
+  ota: { ...SOLVE_OTA, weightG: 2600 },
+  camera: { ...SOLVE_CAMERA, weightG: 650 },
+  guiderWeightG: 400,
+  candidates: [
+    { ...m48part('focuser', '调焦座', 35), weightG: 800 },
+    { ...m48part('filterWheel', '滤镜轮', 20), weightG: 500 },
+    { ...m48part('adapter', '7.5mm 环', 7.5), weightG: 600 },
+    { ...m48part('adapter', '5mm 环', 5), weightG: 40 },
+    { ...m48part('adapter', '2.5mm 环', 2.5), weightG: 30 }
+  ]
+};
+
+test('反推载重评估：整套重量含导星，超重方案排在最后', () => {
+  const report = solveChain(readTrainSolveInput({ ...WEIGHTED_SOLVE_INPUT, payloadMarginKg: 5.2 }));
+
+  assert.equal(report.solutionCount, 2);
+  assert.equal(report.payloadMarginKg, 5.2);
+  // 4 件方案 5020g 合格排前；3 件方案 5550g 超重排后，即使件数更少
+  assert.equal(report.solutions[0].partCount, 4);
+  assert.equal(report.solutions[0].weightG, 5020);
+  assert.equal(report.solutions[0].overweight, false);
+  assert.equal(report.solutions[1].partCount, 3);
+  assert.equal(report.solutions[1].weightG, 5550);
+  assert.equal(report.solutions[1].overweight, true);
+  assert.equal(report.allOverweight, false);
+});
+
+test('反推全部方案超重：allOverweight 明确标出', () => {
+  const report = solveChain(readTrainSolveInput({ ...WEIGHTED_SOLVE_INPUT, payloadMarginKg: 4 }));
+
+  assert.equal(report.ok, true);
+  assert.equal(report.solutionCount, 2);
+  assert.ok(report.solutions.every((s) => s.overweight));
+  assert.equal(report.allOverweight, true);
+});
+
+test('反推不提供重量与余量时：不评估超重，排序行为与之前一致', () => {
+  const report = solveFor({
+    candidates: [
+      m48part('focuser', '调焦座', 35),
+      m48part('filterWheel', '滤镜轮', 20),
+      m48part('adapter', '7.5mm 环', 7.5),
+      m48part('adapter', '5mm 环', 5),
+      m48part('adapter', '2.5mm 环', 2.5)
+    ]
+  });
+
+  assert.equal(report.payloadMarginKg, null);
+  assert.equal(report.allOverweight, false);
+  assert.ok(report.solutions.every((s) => s.overweight === false));
+  assert.equal(report.solutions[0].partCount, 3);
+  assert.equal(report.solutions[1].partCount, 4);
+});

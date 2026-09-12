@@ -318,7 +318,8 @@ function normalizeCandidate(raw, index) {
     name,
     lengthMm: numberField(raw, 'lengthMm', { ...TRAIN_LIMITS.lengthMm, label: `「${name}」占位长度（mm）` }),
     threadFront: readThread(raw, 'threadFront', { label: `「${name}」前端接口` }),
-    threadRear: readThread(raw, 'threadRear', { label: `「${name}」后端接口` })
+    threadRear: readThread(raw, 'threadRear', { label: `「${name}」后端接口` }),
+    weightG: numberField(raw, 'weightG', { ...TRAIN_LIMITS.weightG, label: `「${name}」重量（g）`, fallback: 0 })
   };
 }
 
@@ -340,12 +341,14 @@ export function readTrainSolveInput(body) {
       ...TRAIN_LIMITS.requiredBackfocusMm,
       label: '主镜要求后截距（mm）'
     }),
-    threadRear: readThread(raw, 'threadRear', { label: '主镜后端接口' })
+    threadRear: readThread(raw, 'threadRear', { label: '主镜后端接口' }),
+    weightG: numberField(raw, 'weightG', { ...TRAIN_LIMITS.weightG, label: '主镜重量（g）', fallback: 0 })
   }));
   const camera = readEnd(body.camera, '相机', (raw) => ({
     name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 30) : '相机',
     lengthMm: numberField(raw, 'lengthMm', { ...TRAIN_LIMITS.lengthMm, label: '相机法兰距（mm）' }),
-    threadFront: readThread(raw, 'threadFront', { label: '相机前端接口' })
+    threadFront: readThread(raw, 'threadFront', { label: '相机前端接口' }),
+    weightG: numberField(raw, 'weightG', { ...TRAIN_LIMITS.weightG, label: '相机重量（g）', fallback: 0 })
   }));
   if (!Array.isArray(body.candidates)) {
     throw new ValidationError('可选件清单「candidates」必须是数组');
@@ -353,7 +356,17 @@ export function readTrainSolveInput(body) {
   if (body.candidates.length > SOLVER_LIMITS.maxCandidates) {
     throw new ValidationError(`可选件不能超过 ${SOLVER_LIMITS.maxCandidates} 件`);
   }
-  return { ota, camera, candidates: body.candidates.map((raw, index) => normalizeCandidate(raw, index)) };
+  return {
+    ota,
+    camera,
+    candidates: body.candidates.map((raw, index) => normalizeCandidate(raw, index)),
+    payloadMarginKg: numberField(body, 'payloadMarginKg', { ...TRAIN_LIMITS.payloadMarginKg, fallback: null }),
+    guiderWeightG: numberField(body, 'guiderWeightG', {
+      ...TRAIN_LIMITS.weightG,
+      label: '导星设备重量（g）',
+      fallback: 0
+    })
+  };
 }
 
 /**
@@ -361,9 +374,12 @@ export function readTrainSolveInput(body) {
  * 接口逐节匹配，每件可选件最多用一次。
  * 同一组部件的不同堆叠顺序只保留一个代表（按规格多重集去重）；
  * 无解时返回卡点时所在的最深一段与长度最接近的组合。
+ * 提供载重余量时评估每套整套重量（含导星设备），超重方案排在最后。
  */
-export function solveChain({ ota, camera, candidates }) {
+export function solveChain({ ota, camera, candidates, payloadMarginKg = null, guiderWeightG = 0 }) {
   const targetMm = roundTo(ota.requiredBackfocusMm - camera.lengthMm, 2);
+  const baseWeightG = (ota.weightG ?? 0) + (camera.weightG ?? 0) + guiderWeightG;
+  const marginG = payloadMarginKg === null ? null : roundTo(payloadMarginKg * 1000, 1);
   const solutions = [];
   const seenMultisets = new Set();
   const visited = new Set();
@@ -386,7 +402,14 @@ export function solveChain({ ota, camera, candidates }) {
         const key = parts.map(signature).sort().join('>');
         if (!seenMultisets.has(key)) {
           seenMultisets.add(key);
-          solutions.push({ parts: [...parts], middleLengthMm: middleMm, gapMm });
+          const weightG = roundTo(parts.reduce((sum, part) => sum + (part.weightG ?? 0), baseWeightG), 1);
+          solutions.push({
+            parts: [...parts],
+            middleLengthMm: middleMm,
+            gapMm,
+            weightG,
+            overweight: marginG !== null && weightG > marginG
+          });
         }
       } else if (!closest || Math.abs(gapMm) < Math.abs(closest.gapMm)) {
         closest = { gapMm, names: parts.map((p) => p.name) };
@@ -441,8 +464,15 @@ export function solveChain({ ota, camera, candidates }) {
 
   dfs(0, -1, ota.threadRear, ota.name, 0, []);
 
-  solutions.sort((a, b) => a.parts.length - b.parts.length || a.middleLengthMm - b.middleLengthMm);
+  // 合格的在前（件数少→总长短），超重的整体排最后
+  solutions.sort(
+    (a, b) =>
+      Number(a.overweight) - Number(b.overweight) ||
+      a.parts.length - b.parts.length ||
+      a.middleLengthMm - b.middleLengthMm
+  );
   const solutionCount = solutions.length;
+  const allOverweight = marginG !== null && solutionCount > 0 && solutions.every((s) => s.overweight);
 
   const blockers = [];
   if (solutionCount === 0) {
@@ -475,6 +505,8 @@ export function solveChain({ ota, camera, candidates }) {
     cameraFlangeMm: camera.lengthMm,
     requiredBackfocusMm: ota.requiredBackfocusMm,
     targetMm,
+    payloadMarginKg,
+    allOverweight,
     solutionCount,
     solutions: solutions.slice(0, SOLVER_LIMITS.maxSolutions).map((solution) => {
       let cumulativeMm = 0;
@@ -494,7 +526,9 @@ export function solveChain({ ota, camera, candidates }) {
         }),
         middleLengthMm: solution.middleLengthMm,
         totalLengthMm: roundTo(solution.middleLengthMm + camera.lengthMm, 2),
-        gapMm: solution.gapMm
+        gapMm: solution.gapMm,
+        weightG: solution.weightG,
+        overweight: solution.overweight
       };
     }),
     blockers,

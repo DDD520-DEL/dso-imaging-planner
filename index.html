@@ -219,7 +219,21 @@
                 <select id="solve-camera-thread"></select>
               </label>
             </div>
-            <p class="hint">手上可用的调焦座 / 滤镜轮 / 转接环逐件填入，每件最多用一次。</p>
+            <div class="field-row">
+              <label class="field">
+                <span>主镜重量（g）</span>
+                <input id="solve-ota-weight" type="number" min="0" max="50000" step="1" value="2600" />
+              </label>
+              <label class="field">
+                <span>相机重量（g）</span>
+                <input id="solve-camera-weight" type="number" min="0" max="50000" step="1" value="650" />
+              </label>
+              <label class="field">
+                <span>导星设备重量（g）</span>
+                <input id="solve-guider-weight" type="number" min="0" max="50000" step="1" value="400" />
+              </label>
+            </div>
+            <p class="hint">手上可用的调焦座 / 滤镜轮 / 转接环逐件填入，每件最多用一次；整套重量（含导星）按上方器材齐套的载重余量评估。</p>
             <div id="solve-candidate-rows" class="train-rows"></div>
             <div class="actions">
               <button id="solve-add-row" type="button" class="ghost">+ 添加可选件</button>

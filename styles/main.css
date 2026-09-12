@@ -708,6 +708,10 @@ button.ghost {
   font-size: 13px;
 }
 
+.solve-card--overweight {
+  border-color: rgba(240, 180, 92, 0.45);
+}
+
 .solve-card > p {
   margin: 0 0 6px;
 }

@@ -295,6 +295,39 @@ test('反推搭配接口：返回可行组合与卡点说明，参数非法返�
   });
 });
 
+test('反推搭配接口：载重余量参与评估，超重方案排最后并支持全部超重', async () => {
+  await withServer(async (base) => {
+    const weighted = {
+      ota: { requiredBackfocusMm: 80, threadRear: 'M48F', weightG: 2600 },
+      camera: { lengthMm: 17.5, threadFront: 'M48M', weightG: 650 },
+      guiderWeightG: 400,
+      candidates: [
+        { type: 'focuser', name: '调焦座', lengthMm: 35, threadFront: 'M48M', threadRear: 'M48F', weightG: 800 },
+        { type: 'filterWheel', name: '滤镜轮', lengthMm: 20, threadFront: 'M48M', threadRear: 'M48F', weightG: 500 },
+        { type: 'adapter', name: '7.5mm 环', lengthMm: 7.5, threadFront: 'M48M', threadRear: 'M48F', weightG: 600 },
+        { type: 'adapter', name: '5mm 环', lengthMm: 5, threadFront: 'M48M', threadRear: 'M48F', weightG: 40 },
+        { type: 'adapter', name: '2.5mm 环', lengthMm: 2.5, threadFront: 'M48M', threadRear: 'M48F', weightG: 30 }
+      ]
+    };
+
+    const partial = await postJson(base, '/api/train/solve', { ...weighted, payloadMarginKg: 5.2 });
+    assert.equal(partial.status, 200);
+    const partialReport = await partial.json();
+    assert.equal(partialReport.solutionCount, 2);
+    assert.equal(partialReport.solutions[0].overweight, false);
+    assert.equal(partialReport.solutions[0].weightG, 5020);
+    assert.equal(partialReport.solutions[1].overweight, true);
+    assert.equal(partialReport.solutions[1].weightG, 5550);
+    assert.equal(partialReport.allOverweight, false);
+
+    const allOver = await postJson(base, '/api/train/solve', { ...weighted, payloadMarginKg: 4 });
+    assert.equal(allOver.status, 200);
+    const allOverReport = await allOver.json();
+    assert.equal(allOverReport.allOverweight, true);
+    assert.ok(allOverReport.solutions.every((s) => s.overweight));
+  });
+});
+
 test('错误处理：坏 JSON 返回 400，未知接口返回 404', async () => {
   await withServer(async (base) => {
     const brokenJson = await fetch(`${base}/api/tracking/check`, {

@@ -52,7 +52,10 @@ const DEFAULTS = {
   trkSubExposure: 300,
   trainMargin: 6,
   solveBackfocus: 80,
-  solveFlange: 17.5
+  solveFlange: 17.5,
+  solveOtaWeight: 2600,
+  solveCameraWeight: 650,
+  solveGuiderWeight: 400
 };
 
 const FIELDS = {
@@ -87,6 +90,9 @@ const FIELDS = {
   trainMargin: 'train-margin',
   solveBackfocus: 'solve-backfocus',
   solveFlange: 'solve-flange',
+  solveOtaWeight: 'solve-ota-weight',
+  solveCameraWeight: 'solve-camera-weight',
+  solveGuiderWeight: 'solve-guider-weight',
   targetName: 'target-name-input',
   targetRaInput: 'target-ra-input',
   targetDecInput: 'target-dec-input',
@@ -481,17 +487,10 @@ async function runTrain() {
 
 /* ===== 反推搭配 ===== */
 
-// 可选件只用光路中段类型，且不需要重量字段
+// 可选件只用光路中段类型，字段与器材齐套一致（含重量，用于载重评估）
 const SOLVE_MIDDLE_TYPES = ['focuser', 'filterWheel', 'adapter'];
-const SOLVE_TYPE_FIELDS = Object.fromEntries(
-  SOLVE_MIDDLE_TYPES.map((type) => [type, TRAIN_TYPE_FIELDS[type].filter((field) => field.key !== 'weightG')])
-);
-const SOLVE_TYPE_DEFAULTS = Object.fromEntries(
-  SOLVE_MIDDLE_TYPES.map((type) => [
-    type,
-    Object.fromEntries(Object.entries(TRAIN_TYPE_DEFAULTS[type]).filter(([key]) => key !== 'weightG'))
-  ])
-);
+const SOLVE_TYPE_FIELDS = Object.fromEntries(SOLVE_MIDDLE_TYPES.map((type) => [type, TRAIN_TYPE_FIELDS[type]]));
+const SOLVE_TYPE_DEFAULTS = Object.fromEntries(SOLVE_MIDDLE_TYPES.map((type) => [type, TRAIN_TYPE_DEFAULTS[type]]));
 
 const SOLVE_DEFAULT_ROWS = [
   { type: 'focuser', name: '调焦座' },
@@ -549,8 +548,18 @@ function collectSolve() {
     return item;
   });
   return {
-    ota: { requiredBackfocusMm: numberValue('solveBackfocus'), threadRear: elements.solveOtaThread.value },
-    camera: { lengthMm: numberValue('solveFlange'), threadFront: elements.solveCameraThread.value },
+    ota: {
+      requiredBackfocusMm: numberValue('solveBackfocus'),
+      threadRear: elements.solveOtaThread.value,
+      weightG: numberValue('solveOtaWeight')
+    },
+    camera: {
+      lengthMm: numberValue('solveFlange'),
+      threadFront: elements.solveCameraThread.value,
+      weightG: numberValue('solveCameraWeight')
+    },
+    guiderWeightG: numberValue('solveGuiderWeight'),
+    payloadMarginKg: numberValue('trainMargin'),
     candidates
   };
 }
@@ -568,7 +577,17 @@ async function runSolve() {
     renderSolvePanel(elements.panels.solve, report);
     elements.panels.solve.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     if (report.ok) {
-      setSolveMessage(`找到 ${report.solutionCount} 套正好合焦的组合，按件数从少到多排列。`, 'ok');
+      if (report.allOverweight) {
+        setSolveMessage(`找到 ${report.solutionCount} 套组合，但整套重量都超出载重余量。`, 'error');
+      } else {
+        const overweightCount = report.solutions.filter((s) => s.overweight).length;
+        setSolveMessage(
+          overweightCount > 0
+            ? `找到 ${report.solutionCount} 套组合，其中 ${overweightCount} 套整套超重，已排在最后。`
+            : `找到 ${report.solutionCount} 套正好合焦的组合，按件数从少到多排列。`,
+          overweightCount > 0 ? 'hint' : 'ok'
+        );
+      }
     } else {
       setSolveMessage('凑不出正好合焦的组合，卡点说明见面板。', 'error');
     }
