@@ -31,3 +31,4 @@ export const postVisibility = (payload) => request('/api/visibility/plan', { met
 export const postTracking = (payload) => request('/api/tracking/check', { method: 'POST', body: payload });
 export const postSchedule = (payload) => request('/api/schedule/plan', { method: 'POST', body: payload });
 export const postTrain = (payload) => request('/api/train/check', { method: 'POST', body: payload });
+export const postSolve = (payload) => request('/api/train/solve', { method: 'POST', body: payload });

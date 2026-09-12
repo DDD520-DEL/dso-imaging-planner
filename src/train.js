@@ -288,3 +288,216 @@ export function readTrainInput(body) {
     items: body.items.map((raw, index) => normalizeItem(raw, index))
   };
 }
+
+/* ===== 反推搭配：固定主镜与相机，从可选件里凑正好合焦的组合 ===== */
+
+/** 可选件只允许光路中段类型（调焦座/滤镜轮/转接环） */
+export const SOLVER_MIDDLE_TYPES = ['focuser', 'filterWheel', 'adapter'];
+
+export const SOLVER_LIMITS = {
+  maxCandidates: 10,
+  maxSolutions: 50
+};
+
+function normalizeCandidate(raw, index) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ValidationError(`第 ${index + 1} 件可选件必须是对象`);
+  }
+  const type = String(raw.type ?? '').trim();
+  if (!SOLVER_MIDDLE_TYPES.includes(type)) {
+    throw new ValidationError(
+      `第 ${index + 1} 件可选件的类型必须是 ${SOLVER_MIDDLE_TYPES.map((t) => ITEM_TYPES[t].label).join('/')}`
+    );
+  }
+  const name =
+    typeof raw.name === 'string' && raw.name.trim()
+      ? raw.name.trim().slice(0, 30)
+      : `${ITEM_TYPES[type].label} ${index + 1}`;
+  return {
+    type,
+    name,
+    lengthMm: numberField(raw, 'lengthMm', { ...TRAIN_LIMITS.lengthMm, label: `「${name}」占位长度（mm）` }),
+    threadFront: readThread(raw, 'threadFront', { label: `「${name}」前端接口` }),
+    threadRear: readThread(raw, 'threadRear', { label: `「${name}」后端接口` })
+  };
+}
+
+function readEnd(raw, kind, fields) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ValidationError(`缺少${kind}参数`);
+  }
+  return fields(raw);
+}
+
+/** 反推接口的请求校验：固定两端 + 可选件池 */
+export function readTrainSolveInput(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new ValidationError('请求体必须是 JSON 对象');
+  }
+  const ota = readEnd(body.ota, '主镜', (raw) => ({
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 30) : '主镜',
+    requiredBackfocusMm: numberField(raw, 'requiredBackfocusMm', {
+      ...TRAIN_LIMITS.requiredBackfocusMm,
+      label: '主镜要求后截距（mm）'
+    }),
+    threadRear: readThread(raw, 'threadRear', { label: '主镜后端接口' })
+  }));
+  const camera = readEnd(body.camera, '相机', (raw) => ({
+    name: typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim().slice(0, 30) : '相机',
+    lengthMm: numberField(raw, 'lengthMm', { ...TRAIN_LIMITS.lengthMm, label: '相机法兰距（mm）' }),
+    threadFront: readThread(raw, 'threadFront', { label: '相机前端接口' })
+  }));
+  if (!Array.isArray(body.candidates)) {
+    throw new ValidationError('可选件清单「candidates」必须是数组');
+  }
+  if (body.candidates.length > SOLVER_LIMITS.maxCandidates) {
+    throw new ValidationError(`可选件不能超过 ${SOLVER_LIMITS.maxCandidates} 件`);
+  }
+  return { ota, camera, candidates: body.candidates.map((raw, index) => normalizeCandidate(raw, index)) };
+}
+
+/**
+ * 反推合焦组合：中段长度需落在 要求后截距 − 相机法兰距 ± 调焦行程容差 内，
+ * 接口逐节匹配，每件可选件最多用一次。
+ * 同一组部件的不同堆叠顺序只保留一个代表（按规格多重集去重）；
+ * 无解时返回卡点时所在的最深一段与长度最接近的组合。
+ */
+export function solveChain({ ota, camera, candidates }) {
+  const targetMm = roundTo(ota.requiredBackfocusMm - camera.lengthMm, 2);
+  const solutions = [];
+  const seenMultisets = new Set();
+  const visited = new Set();
+  const failures = [];
+  let closest = null;
+
+  // 同一规格（类型/长度/接口）的可选件可以互换，按规格签名去重
+  const signature = (part) => `${part.type}|${part.lengthMm}|${part.threadFront}|${part.threadRear}`;
+
+  function dfs(mask, lastIndex, lastThread, lastName, middleMm, parts) {
+    const visitKey = `${mask}:${lastIndex}`;
+    if (visited.has(visitKey)) return;
+    visited.add(visitKey);
+
+    const gapMm = roundTo(targetMm - middleMm, 2);
+    const inWindow = Math.abs(gapMm) < FOCUS_TRAVEL_TOLERANCE_MM;
+    const cameraFits = threadsMatch(lastThread, camera.threadFront);
+    if (cameraFits) {
+      if (inWindow) {
+        const key = parts.map(signature).sort().join('>');
+        if (!seenMultisets.has(key)) {
+          seenMultisets.add(key);
+          solutions.push({ parts: [...parts], middleLengthMm: middleMm, gapMm });
+        }
+      } else if (!closest || Math.abs(gapMm) < Math.abs(closest.gapMm)) {
+        closest = { gapMm, names: parts.map((p) => p.name) };
+      }
+    } else if (inWindow) {
+      failures.push({
+        depth: parts.length,
+        code: 'camera-mismatch',
+        message: `长度已凑到 ${middleMm} mm，但「${lastName}」的${threadLabel(lastThread)}接不上${camera.name}前端（${threadLabel(camera.threadFront)}）`
+      });
+    }
+
+    let matched = 0;
+    let extended = false;
+    for (let i = 0; i < candidates.length; i += 1) {
+      if (mask & (1 << i)) continue;
+      const candidate = candidates[i];
+      if (!threadsMatch(lastThread, candidate.threadFront)) continue;
+      matched += 1;
+      const nextMm = roundTo(middleMm + candidate.lengthMm, 2);
+      if (nextMm >= targetMm + FOCUS_TRAVEL_TOLERANCE_MM - 1e-9) continue; // 再加就超出合焦窗口
+      extended = true;
+      dfs(mask | (1 << i), i, candidate.threadRear, candidate.name, nextMm, [...parts, candidate]);
+    }
+    if (extended) return;
+    if (matched > 0) {
+      failures.push({
+        depth: parts.length,
+        code: 'length-overflow',
+        message: `「${lastName}」之后能接的可选件加上去都会超出后截距`
+      });
+      return;
+    }
+    if (parts.length === 0) {
+      // 有可选件但第一件就接不上主镜后端
+      if (candidates.length > 0 && !(cameraFits && inWindow)) {
+        failures.push({
+          depth: 0,
+          code: 'thread-dead-end',
+          message: `没有可选件能接上${ota.name}后端（${threadLabel(ota.threadRear)}），卡在第一段`
+        });
+      }
+    } else if (!cameraFits && !inWindow) {
+      // 长度已在窗口内时由 camera-mismatch 说明，不重复报接口死路
+      failures.push({
+        depth: parts.length,
+        code: 'thread-dead-end',
+        message: `「${lastName}」的${threadLabel(lastThread)}之后没有能接的可选件`
+      });
+    }
+  }
+
+  dfs(0, -1, ota.threadRear, ota.name, 0, []);
+
+  solutions.sort((a, b) => a.parts.length - b.parts.length || a.middleLengthMm - b.middleLengthMm);
+  const solutionCount = solutions.length;
+
+  const blockers = [];
+  if (solutionCount === 0) {
+    // 只报告最深一段的卡点（最可行动），再附长度最接近的组合
+    const maxDepth = failures.reduce((max, f) => Math.max(max, f.depth), 0);
+    const seenMessages = new Set();
+    for (const failure of failures) {
+      if (failure.depth < maxDepth || seenMessages.has(failure.message)) continue;
+      seenMessages.add(failure.message);
+      blockers.push({ code: failure.code, message: failure.message });
+      if (blockers.length >= 3) break;
+    }
+    if (closest) {
+      const who = closest.names.length > 0 ? `「${closest.names.join(' → ')}」` : '相机直连';
+      blockers.push({
+        code: 'closest-miss',
+        message: `长度最接近的是${who}，${closest.gapMm > 0 ? '还差' : '超出'} ${roundTo(Math.abs(closest.gapMm), 2)} mm`
+      });
+    }
+    if (blockers.length === 0) {
+      blockers.push({ code: 'no-combination', message: '可选件凑不出正好合焦的组合' });
+    }
+  }
+
+  return {
+    otaName: ota.name,
+    otaThreadRear: ota.threadRear,
+    cameraName: camera.name,
+    cameraThreadFront: camera.threadFront,
+    cameraFlangeMm: camera.lengthMm,
+    requiredBackfocusMm: ota.requiredBackfocusMm,
+    targetMm,
+    solutionCount,
+    solutions: solutions.slice(0, SOLVER_LIMITS.maxSolutions).map((solution) => {
+      let cumulativeMm = 0;
+      return {
+        partCount: solution.parts.length,
+        parts: solution.parts.map((part) => {
+          cumulativeMm = roundTo(cumulativeMm + part.lengthMm, 2);
+          return {
+            name: part.name,
+            type: part.type,
+            typeLabel: ITEM_TYPES[part.type].label,
+            lengthMm: part.lengthMm,
+            cumulativeMm,
+            threadFront: part.threadFront,
+            threadRear: part.threadRear
+          };
+        }),
+        middleLengthMm: solution.middleLengthMm,
+        totalLengthMm: roundTo(solution.middleLengthMm + camera.lengthMm, 2),
+        gapMm: solution.gapMm
+      };
+    }),
+    blockers,
+    ok: solutionCount > 0
+  };
+}

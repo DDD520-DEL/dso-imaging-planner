@@ -5,6 +5,8 @@ import {
   chainReport,
   normalizeItem,
   readTrainInput,
+  readTrainSolveInput,
+  solveChain,
   suggestSpacers,
   threadsMatch
 } from '../src/train.js';
@@ -232,4 +234,128 @@ test('字段校验：缺重量、接口规格非法、长度越界都会报 400 
     () => normalizeItem({ type: 'adapter', lengthMm: 5, threadFront: 'NONE', threadRear: 'M48F', weightG: 50 }),
     /不是受支持的接口规格|缺少参数/
   );
+});
+
+/* ===== 反推搭配 ===== */
+
+const SOLVE_OTA = { requiredBackfocusMm: 80, threadRear: 'M48F' };
+const SOLVE_CAMERA = { lengthMm: 17.5, threadFront: 'M48M' }; // 中段目标 62.5 mm
+
+function m48part(type, name, lengthMm) {
+  return { type, name, lengthMm, threadFront: 'M48M', threadRear: 'M48F' };
+}
+
+function solveFor({ ota = {}, camera = {}, candidates }) {
+  return solveChain(readTrainSolveInput({ ota: { ...SOLVE_OTA, ...ota }, camera: { ...SOLVE_CAMERA, ...camera }, candidates }));
+}
+
+test('反推能凑出：多解按件数从少到多、总长从短到长排列', () => {
+  const report = solveFor({
+    candidates: [
+      m48part('focuser', '调焦座', 35),
+      m48part('filterWheel', '滤镜轮', 20),
+      m48part('adapter', '7.5mm 环', 7.5),
+      m48part('adapter', '5mm 环', 5),
+      m48part('adapter', '2.5mm 环', 2.5)
+    ]
+  });
+
+  assert.equal(report.ok, true);
+  assert.equal(report.targetMm, 62.5);
+  // 62.5 = 35+20+7.5（3 件）= 35+20+5+2.5（4 件），同一组部件的不同顺序只算一套
+  assert.equal(report.solutionCount, 2);
+  assert.equal(report.solutions[0].partCount, 3);
+  assert.equal(report.solutions[1].partCount, 4);
+  for (const solution of report.solutions) {
+    assert.equal(solution.totalLengthMm, 80);
+    assert.equal(solution.gapMm, 0);
+  }
+  // 累加表逐节累计
+  assert.deepEqual(
+    report.solutions[0].parts.map((p) => p.cumulativeMm),
+    [35, 55, 62.5]
+  );
+  assert.deepEqual(report.blockers, []);
+});
+
+test('反推只有唯一解', () => {
+  const report = solveFor({
+    candidates: [m48part('focuser', '调焦座', 35), m48part('filterWheel', '滤镜轮', 20), m48part('adapter', '7.5mm 环', 7.5)]
+  });
+
+  assert.equal(report.ok, true);
+  assert.equal(report.solutionCount, 1);
+  const solution = report.solutions[0];
+  assert.equal(solution.partCount, 3);
+  assert.deepEqual(
+    solution.parts.map((p) => p.name),
+    ['调焦座', '滤镜轮', '7.5mm 环']
+  );
+});
+
+test('反推支持相机直连：法兰距正好等于要求后截距时给出 0 件方案', () => {
+  const report = solveFor({ ota: { requiredBackfocusMm: 17.5 }, candidates: [] });
+  assert.equal(report.ok, true);
+  assert.equal(report.solutionCount, 1);
+  assert.equal(report.solutions[0].partCount, 0);
+  assert.equal(report.solutions[0].totalLengthMm, 17.5);
+});
+
+test('反推凑不出（接口死路）：说明卡在第一段', () => {
+  const report = solveFor({
+    candidates: [
+      { type: 'focuser', name: '调焦座', lengthMm: 35, threadFront: 'M42M', threadRear: 'M42F' },
+      { type: 'adapter', name: '5mm 环', lengthMm: 5, threadFront: 'M42M', threadRear: 'M42F' }
+    ]
+  });
+
+  assert.equal(report.ok, false);
+  assert.equal(report.solutionCount, 0);
+  assert.equal(report.blockers[0].code, 'thread-dead-end');
+  assert.match(report.blockers[0].message, /卡在第一段/);
+  assert.match(report.blockers[0].message, /M48 内/);
+});
+
+test('反推凑不出（相机接不上）：长度凑到但接口不通', () => {
+  const report = solveFor({
+    camera: { threadFront: 'M54M' },
+    candidates: [m48part('focuser', '调焦座', 35), m48part('filterWheel', '滤镜轮', 20), m48part('adapter', '7.5mm 环', 7.5)]
+  });
+
+  assert.equal(report.ok, false);
+  const blocker = report.blockers.find((b) => b.code === 'camera-mismatch');
+  assert.ok(blocker);
+  assert.match(blocker.message, /62\.5 mm/);
+  assert.match(blocker.message, /接不上相机前端（M54 外）/);
+});
+
+test('反推凑不出（长度凑不到）：报告最接近的组合', () => {
+  const report = solveFor({
+    candidates: [m48part('focuser', '40mm 调焦座', 40), m48part('adapter', '30mm 环', 30)]
+  });
+
+  assert.equal(report.ok, false);
+  assert.ok(report.blockers.some((b) => b.code === 'length-overflow'));
+  const closest = report.blockers.find((b) => b.code === 'closest-miss');
+  assert.ok(closest);
+  assert.match(closest.message, /40mm 调焦座/);
+  assert.match(closest.message, /还差 22\.5 mm/);
+});
+
+test('反推参数校验：缺主镜、可选件类型非法、数量超限都会报错', () => {
+  assert.throws(() => readTrainSolveInput({ camera: SOLVE_CAMERA, candidates: [] }), /主镜/);
+  assert.throws(
+    () => readTrainSolveInput({ ota: SOLVE_OTA, camera: SOLVE_CAMERA, candidates: [{ type: 'camera', lengthMm: 5 }] }),
+    /类型必须是/
+  );
+  assert.throws(
+    () =>
+      readTrainSolveInput({
+        ota: SOLVE_OTA,
+        camera: SOLVE_CAMERA,
+        candidates: Array.from({ length: 11 }, (_, i) => m48part('adapter', `环${i}`, 5))
+      }),
+    /不能超过 10 件/
+  );
+  assert.throws(() => readTrainSolveInput({ ota: SOLVE_OTA, camera: SOLVE_CAMERA }), /candidates.*数组/);
 });

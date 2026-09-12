@@ -5,6 +5,7 @@ import {
   postExposure,
   postOptics,
   postSchedule,
+  postSolve,
   postTracking,
   postTrain,
   postVisibility,
@@ -15,6 +16,7 @@ import { setLastReport, setTargets } from './state.js';
 import { renderExposurePanel } from './components/exposure-panel.js';
 import { renderOpticsPanel } from './components/optics-panel.js';
 import { renderSchedulePanel } from './components/schedule-panel.js';
+import { renderSolvePanel } from './components/solve-panel.js';
 import { renderTargetList } from './components/target-library.js';
 import { renderTrackingPanel } from './components/tracking-panel.js';
 import { renderTrainPanel } from './components/train-panel.js';
@@ -48,7 +50,9 @@ const DEFAULTS = {
   trackingRms: 0.6,
   trkPixelScale: 1.94,
   trkSubExposure: 300,
-  trainMargin: 6
+  trainMargin: 6,
+  solveBackfocus: 80,
+  solveFlange: 17.5
 };
 
 const FIELDS = {
@@ -81,6 +85,8 @@ const FIELDS = {
   schedTargetSwitch: 'sched-target-switch',
   schedFilterSwitch: 'sched-filter-switch',
   trainMargin: 'train-margin',
+  solveBackfocus: 'solve-backfocus',
+  solveFlange: 'solve-flange',
   targetName: 'target-name-input',
   targetRaInput: 'target-ra-input',
   targetDecInput: 'target-dec-input',
@@ -110,13 +116,20 @@ function cacheElements() {
   elements.trainAddRow = document.getElementById('train-add-row');
   elements.trainRun = document.getElementById('train-run');
   elements.trainMessage = document.getElementById('train-message');
+  elements.solveOtaThread = document.getElementById('solve-ota-thread');
+  elements.solveCameraThread = document.getElementById('solve-camera-thread');
+  elements.solveRows = document.getElementById('solve-candidate-rows');
+  elements.solveAddRow = document.getElementById('solve-add-row');
+  elements.solveRun = document.getElementById('solve-run');
+  elements.solveMessage = document.getElementById('solve-message');
   elements.panels = {
     optics: document.getElementById('optics-panel'),
     exposure: document.getElementById('exposure-panel'),
     visibility: document.getElementById('visibility-panel'),
     tracking: document.getElementById('tracking-panel'),
     schedule: document.getElementById('schedule-panel'),
-    train: document.getElementById('train-panel')
+    train: document.getElementById('train-panel'),
+    solve: document.getElementById('solve-panel')
   };
 }
 
@@ -466,6 +479,106 @@ async function runTrain() {
   }
 }
 
+/* ===== 反推搭配 ===== */
+
+// 可选件只用光路中段类型，且不需要重量字段
+const SOLVE_MIDDLE_TYPES = ['focuser', 'filterWheel', 'adapter'];
+const SOLVE_TYPE_FIELDS = Object.fromEntries(
+  SOLVE_MIDDLE_TYPES.map((type) => [type, TRAIN_TYPE_FIELDS[type].filter((field) => field.key !== 'weightG')])
+);
+const SOLVE_TYPE_DEFAULTS = Object.fromEntries(
+  SOLVE_MIDDLE_TYPES.map((type) => [
+    type,
+    Object.fromEntries(Object.entries(TRAIN_TYPE_DEFAULTS[type]).filter(([key]) => key !== 'weightG'))
+  ])
+);
+
+const SOLVE_DEFAULT_ROWS = [
+  { type: 'focuser', name: '调焦座' },
+  { type: 'filterWheel', name: '滤镜轮' },
+  { type: 'adapter', name: '7.5mm 转接环', lengthMm: 7.5 },
+  { type: 'adapter', name: '5mm 转接环' }
+];
+
+function renderSolveRowFields(row, values) {
+  const type = row.querySelector('[data-field="type"]').value;
+  const defaults = SOLVE_TYPE_DEFAULTS[type] ?? {};
+  const fields = row.querySelector('.train-row__fields');
+  fields.innerHTML = SOLVE_TYPE_FIELDS[type]
+    .map((field) => {
+      const value = values[field.key] ?? defaults[field.key] ?? '';
+      if (field.thread) {
+        return `<select data-field="${field.key}" title="${field.label}">${threadOptions(value)}</select>`;
+      }
+      return `<input data-field="${field.key}" type="number" min="0" step="${field.step}" placeholder="${field.label}" title="${field.label}" value="${escapeHtml(value)}" />`;
+    })
+    .join('');
+}
+
+function addSolveRow(values = {}) {
+  const row = document.createElement('div');
+  row.className = 'train-row';
+  const typeOptions = SOLVE_MIDDLE_TYPES.map(
+    (type) =>
+      `<option value="${type}"${type === (values.type ?? 'adapter') ? ' selected' : ''}>${ITEM_TYPES[type].label}</option>`
+  ).join('');
+  row.innerHTML = `
+    <div class="train-row__head">
+      <select data-field="type" title="可选件类型">${typeOptions}</select>
+      <input data-field="name" type="text" maxlength="30" placeholder="可选件名称" value="${escapeHtml(values.name ?? '')}" />
+      <button type="button" class="ghost train-row__remove" title="删除该可选件">✕</button>
+    </div>
+    <div class="train-row__fields"></div>`;
+
+  row.querySelector('[data-field="type"]').addEventListener('change', () => {
+    renderSolveRowFields(row, trainRowValues(row));
+  });
+  row.querySelector('.train-row__remove').addEventListener('click', () => row.remove());
+  elements.solveRows.appendChild(row);
+  renderSolveRowFields(row, values);
+  return row;
+}
+
+function collectSolve() {
+  const candidates = [...elements.solveRows.querySelectorAll('.train-row')].map((row) => {
+    const raw = trainRowValues(row);
+    const item = { type: raw.type, name: raw.name.trim() };
+    for (const field of SOLVE_TYPE_FIELDS[raw.type] ?? []) {
+      item[field.key] = field.thread ? raw[field.key] : raw[field.key] === '' ? NaN : Number(raw[field.key]);
+    }
+    return item;
+  });
+  return {
+    ota: { requiredBackfocusMm: numberValue('solveBackfocus'), threadRear: elements.solveOtaThread.value },
+    camera: { lengthMm: numberValue('solveFlange'), threadFront: elements.solveCameraThread.value },
+    candidates
+  };
+}
+
+function setSolveMessage(text, tone = 'hint') {
+  elements.solveMessage.textContent = text;
+  elements.solveMessage.className = tone;
+}
+
+async function runSolve() {
+  elements.solveRun.disabled = true;
+  setSolveMessage('正在反推合焦组合…');
+  try {
+    const report = await postSolve(collectSolve());
+    renderSolvePanel(elements.panels.solve, report);
+    elements.panels.solve.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (report.ok) {
+      setSolveMessage(`找到 ${report.solutionCount} 套正好合焦的组合，按件数从少到多排列。`, 'ok');
+    } else {
+      setSolveMessage('凑不出正好合焦的组合，卡点说明见面板。', 'error');
+    }
+  } catch (error) {
+    setSolveMessage(`反推失败：${error.message}`, 'error');
+  } finally {
+    elements.solveRun.disabled = false;
+  }
+}
+
 function setStatus(text, tone) {
   elements.apiStatus.textContent = text;
   elements.apiStatus.className = `status status--${tone}`;
@@ -607,13 +720,18 @@ function bindEvents() {
   elements.schedRun.addEventListener('click', runSchedule);
   elements.trainAddRow.addEventListener('click', () => addTrainRow());
   elements.trainRun.addEventListener('click', runTrain);
+  elements.solveAddRow.addEventListener('click', () => addSolveRow());
+  elements.solveRun.addEventListener('click', runSolve);
 }
 
 async function init() {
   cacheElements();
+  elements.solveOtaThread.innerHTML = threadOptions('M48F');
+  elements.solveCameraThread.innerHTML = threadOptions('M48M');
   applyDefaults();
   for (const row of SCHEDULE_DEFAULTS_ROWS) addScheduleRow(row);
   for (const row of TRAIN_DEFAULT_ROWS) addTrainRow(row);
+  for (const row of SOLVE_DEFAULT_ROWS) addSolveRow(row);
   bindEvents();
   await Promise.all([refreshHealth(), refreshTargets()]);
 }

@@ -254,6 +254,47 @@ test('器材链路接口：合焦差额与转接环建议，结构非法返回 4
   });
 });
 
+test('反推搭配接口：返回可行组合与卡点说明，参数非法返回 400', async () => {
+  await withServer(async (base) => {
+    const m48part = (type, name, lengthMm) => ({ type, name, lengthMm, threadFront: 'M48M', threadRear: 'M48F' });
+    const ends = {
+      ota: { requiredBackfocusMm: 80, threadRear: 'M48F' },
+      camera: { lengthMm: 17.5, threadFront: 'M48M' }
+    };
+
+    const ok = await postJson(base, '/api/train/solve', {
+      ...ends,
+      candidates: [
+        m48part('focuser', '调焦座', 35),
+        m48part('filterWheel', '滤镜轮', 20),
+        m48part('adapter', '7.5mm 环', 7.5),
+        m48part('adapter', '5mm 环', 5),
+        m48part('adapter', '2.5mm 环', 2.5)
+      ]
+    });
+    assert.equal(ok.status, 200);
+    const report = await ok.json();
+    assert.equal(report.ok, true);
+    assert.equal(report.solutionCount, 2);
+    assert.equal(report.solutions[0].partCount, 3);
+    assert.equal(report.solutions[0].totalLengthMm, 80);
+
+    // 凑不出时返回 200 + blockers，不是请求错误
+    const blocked = await postJson(base, '/api/train/solve', {
+      ...ends,
+      candidates: [{ type: 'adapter', name: 'M42 环', lengthMm: 5, threadFront: 'M42M', threadRear: 'M42F' }]
+    });
+    assert.equal(blocked.status, 200);
+    const blockedReport = await blocked.json();
+    assert.equal(blockedReport.ok, false);
+    assert.equal(blockedReport.blockers[0].code, 'thread-dead-end');
+
+    const missingOta = await postJson(base, '/api/train/solve', { camera: ends.camera, candidates: [] });
+    assert.equal(missingOta.status, 400);
+    assert.match((await missingOta.json()).error, /主镜/);
+  });
+});
+
 test('错误处理：坏 JSON 返回 400，未知接口返回 404', async () => {
   await withServer(async (base) => {
     const brokenJson = await fetch(`${base}/api/tracking/check`, {

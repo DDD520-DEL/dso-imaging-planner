@@ -196,6 +196,37 @@
             </div>
             <p id="train-message" class="hint"></p>
           </fieldset>
+
+          <fieldset>
+            <legend>反推搭配（固定主镜与相机，凑正好合焦）</legend>
+            <div class="field-row">
+              <label class="field">
+                <span>要求后截距（mm）</span>
+                <input id="solve-backfocus" type="number" min="0" max="400" step="0.5" value="80" />
+              </label>
+              <label class="field">
+                <span>主镜后端接口</span>
+                <select id="solve-ota-thread"></select>
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>相机法兰距（mm）</span>
+                <input id="solve-flange" type="number" min="0" max="500" step="0.5" value="17.5" />
+              </label>
+              <label class="field">
+                <span>相机前端接口</span>
+                <select id="solve-camera-thread"></select>
+              </label>
+            </div>
+            <p class="hint">手上可用的调焦座 / 滤镜轮 / 转接环逐件填入，每件最多用一次。</p>
+            <div id="solve-candidate-rows" class="train-rows"></div>
+            <div class="actions">
+              <button id="solve-add-row" type="button" class="ghost">+ 添加可选件</button>
+              <button id="solve-run" type="button">反推合焦组合</button>
+            </div>
+            <p id="solve-message" class="hint"></p>
+          </fieldset>
         </form>
 
         <div class="actions">
@@ -213,6 +244,7 @@
         <article id="tracking-panel" class="card" hidden></article>
         <article id="schedule-panel" class="card" hidden></article>
         <article id="train-panel" class="card" hidden></article>
+        <article id="solve-panel" class="card" hidden></article>
       </section>
 
       <section class="panel panel--library">

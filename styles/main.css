@@ -693,3 +693,21 @@ button.ghost {
   color: var(--muted);
   font-weight: 400;
 }
+
+/* 反推搭配方案卡片 */
+.solve-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+  background: rgba(27, 35, 64, 0.45);
+}
+
+.solve-card h4 {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.solve-card > p {
+  margin: 0 0 6px;
+}
