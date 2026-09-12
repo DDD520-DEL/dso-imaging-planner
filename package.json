@@ -1,0 +1,14 @@
+{
+  "name": "dso-imaging-planner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "深空天文摄影规划工作台：光学采样与视场、曝光与信噪比估算、目标可见性、跟踪精度校核（前后端一体，零第三方依赖）",
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

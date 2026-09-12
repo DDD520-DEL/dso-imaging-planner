@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>深空天文摄影规划工作台</title>
+    <link rel="stylesheet" href="./styles/main.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>深空天文摄影规划工作台</h1>
+        <p class="subtitle">光学采样 · 曝光与信噪比 · 目标可见性 · 跟踪精度校核</p>
+      </div>
+      <div id="api-status" class="status status--pending">接口检测中…</div>
+    </header>
+
+    <main class="layout">
+      <section class="panel panel--inputs">
+        <h2>观测配置</h2>
+        <form id="plan-form" autocomplete="off">
+          <fieldset>
+            <legend>光学与相机</legend>
+            <div class="field-row">
+              <label class="field">
+                <span>焦距（mm）</span>
+                <input id="focal-length" type="number" min="50" max="5000" step="1" value="400" />
+              </label>
+              <label class="field">
+                <span>有效口径（mm）</span>
+                <input id="aperture" type="number" min="20" max="2000" step="1" value="80" />
+              </label>
+              <label class="field">
+                <span>像元尺寸（μm）</span>
+                <input id="pixel-size" type="number" min="1" max="20" step="0.01" value="3.76" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>横向像素数</span>
+                <input id="sensor-width" type="number" min="500" max="20000" step="1" value="6000" />
+              </label>
+              <label class="field">
+                <span>纵向像素数</span>
+                <input id="sensor-height" type="number" min="500" max="20000" step="1" value="4000" />
+              </label>
+              <label class="field">
+                <span>视宁度 FWHM（″）</span>
+                <input id="seeing" type="number" min="0.5" max="8" step="0.1" value="2" />
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>曝光与信噪比</legend>
+            <div class="field-row">
+              <label class="field">
+                <span>有效口径（mm）</span>
+                <input id="exp-aperture" type="number" min="20" max="2000" step="1" value="80" />
+              </label>
+              <label class="field">
+                <span>像素尺度（″/px）</span>
+                <input id="exp-pixel-scale" type="number" min="0.2" max="8" step="0.01" value="1.94" />
+              </label>
+              <label class="field">
+                <span>天空亮度（mag/arcsec²）</span>
+                <input id="sky-brightness" type="number" min="16" max="24" step="0.1" value="21.3" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>系统透过率</span>
+                <input id="throughput" type="number" min="0.1" max="1" step="0.01" value="0.8" />
+              </label>
+              <label class="field">
+                <span>量子效率</span>
+                <input id="quantum-efficiency" type="number" min="0.05" max="1" step="0.01" value="0.6" />
+              </label>
+              <label class="field">
+                <span>读出噪声（e-）</span>
+                <input id="read-noise" type="number" min="0.5" max="30" step="0.1" value="1.5" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>暗电流（e-/px/s）</span>
+                <input id="dark-current" type="number" min="0" max="5" step="0.005" value="0.005" />
+              </label>
+              <label class="field">
+                <span>满阱容量（e-）</span>
+                <input id="full-well" type="number" min="1000" max="500000" step="1000" value="50000" />
+              </label>
+              <label class="field">
+                <span>单帧曝光（s）</span>
+                <input id="sub-exposure" type="number" min="1" max="3600" step="1" value="300" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>叠加帧数</span>
+                <input id="frames" type="number" min="1" max="2000" step="1" value="60" />
+              </label>
+              <label class="field">
+                <span>目标信噪比</span>
+                <input id="target-snr" type="number" min="1" max="500" step="1" value="30" />
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>目标与观测地（可见性）</legend>
+            <div class="field-row">
+              <label class="field">
+                <span>观测地纬度（°）</span>
+                <input id="latitude" type="number" min="-89.5" max="89.5" step="0.1" value="32" />
+              </label>
+              <label class="field">
+                <span>目标赤经（h）</span>
+                <input id="target-ra" type="number" min="0" max="24" step="0.01" value="0.71" />
+              </label>
+              <label class="field">
+                <span>目标赤纬（°）</span>
+                <input id="target-dec" type="number" min="-89.5" max="89.5" step="0.01" value="41.27" />
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="field">
+                <span>最低可用高度角（°）</span>
+                <input id="min-altitude" type="number" min="5" max="80" step="1" value="30" />
+              </label>
+              <label class="field">
+                <span>计划观测日期</span>
+                <input id="observe-date" type="date" value="2026-10-15" />
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset>
+            <legend>跟踪校核</legend>
+            <div class="field-row">
+              <label class="field">
+                <span>视宁度 FWHM（″）</span>
+                <input id="trk-seeing" type="number" min="0.5" max="8" step="0.1" value="2" />
+              </label>
+              <label class="field">
+                <span>跟踪 RMS 误差（″）</span>
+                <input id="tracking-rms" type="number" min="0.02" max="10" step="0.01" value="0.6" />
+              </label>
+              <label class="field">
+                <span>像素尺度（″/px）</span>
+                <input id="trk-pixel-scale" type="number" min="0.2" max="8" step="0.01" value="1.94" />
+              </label>
+              <label class="field">
+                <span>单帧曝光（s）</span>
+                <input id="trk-sub-exposure" type="number" min="1" max="3600" step="1" value="300" />
+              </label>
+            </div>
+          </fieldset>
+        </form>
+
+        <div class="actions">
+          <button id="plan-button" type="button">开始规划</button>
+          <button id="reset-button" type="button" class="ghost">恢复默认</button>
+        </div>
+      </section>
+
+      <section class="panel panel--results">
+        <h2>规划结果</h2>
+        <p id="result-message" class="hint">填好左侧参数后点击「开始规划」。</p>
+        <article id="optics-panel" class="card" hidden></article>
+        <article id="exposure-panel" class="card" hidden></article>
+        <article id="visibility-panel" class="card" hidden></article>
+        <article id="tracking-panel" class="card" hidden></article>
+      </section>
+
+      <section class="panel panel--library">
+        <h2>目标库</h2>
+        <p class="hint">内置目标只读；自定义目标写在服务端 data/targets.json，可随时删除。</p>
+        <div id="target-list" class="target-list"></div>
+        <form id="target-form" class="target-form" autocomplete="off">
+          <input id="target-name-input" type="text" maxlength="40" placeholder="目标名称" />
+          <input id="target-ra-input" type="number" min="0" max="24" step="0.01" placeholder="赤经 h" />
+          <input id="target-dec-input" type="number" min="-90" max="90" step="0.01" placeholder="赤纬 °" />
+          <input id="target-mag-input" type="number" min="-2" max="20" step="0.1" placeholder="星等（可空）" />
+          <input id="target-size-input" type="number" min="0.1" max="600" step="0.1" placeholder="尺寸 ′（可空）" />
+          <input id="target-category-input" type="text" maxlength="20" placeholder="类别（可空）" />
+          <button id="target-add-button" type="button">添加目标</button>
+        </form>
+        <p id="target-message" class="hint"></p>
+      </section>
+    </main>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
