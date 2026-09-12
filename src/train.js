@@ -1,0 +1,290 @@
+import { roundTo } from './format.js';
+import { pixelScaleArcsec } from './optics.js';
+import { ValidationError, numberField, stringField } from './validate.js';
+
+/** 器材类型与链路角色：chain=true 的进入光路累加，guider 只计重量与导星采样比 */
+export const ITEM_TYPES = {
+  ota: { label: '主镜', chain: true },
+  focuser: { label: '调焦座', chain: true },
+  filterWheel: { label: '滤镜轮', chain: true },
+  adapter: { label: '转接环', chain: true },
+  camera: { label: '相机', chain: true },
+  guider: { label: '导星设备', chain: false }
+};
+
+/** 螺纹/卡口接口编码；M 螺纹按「同规格 + 内外互补」对接，卡口按同规格对接 */
+export const THREADS = {
+  M42M: { label: 'M42 外', size: 'M42', gender: 'M' },
+  M42F: { label: 'M42 内', size: 'M42', gender: 'F' },
+  M48M: { label: 'M48 外', size: 'M48', gender: 'M' },
+  M48F: { label: 'M48 内', size: 'M48', gender: 'F' },
+  M54M: { label: 'M54 外', size: 'M54', gender: 'M' },
+  M54F: { label: 'M54 内', size: 'M54', gender: 'F' },
+  B2: { label: '2″ 卡口', size: 'B2', gender: 'B' },
+  B125: { label: '1.25″ 卡口', size: 'B125', gender: 'B' },
+  NONE: { label: '无（链路端点）', size: 'NONE', gender: 'N' }
+};
+
+/** 常见转接环厚度（mm），任意 0.5 的倍数都能精确拼出 */
+export const SPACER_SIZES_MM = [20, 10, 5, 3, 2, 1, 0.5];
+
+/** 调焦行程可吸收的偏差：缺口或超出不足 0.5 mm 都不必加环、也不判超长 */
+export const FOCUS_TRAVEL_TOLERANCE_MM = 0.5;
+
+export const TRAIN_LIMITS = {
+  payloadMarginKg: { min: 0, max: 100, label: '赤道仪载重余量（kg）' },
+  lengthMm: { min: 0, max: 500, label: '占位长度（mm）' },
+  requiredBackfocusMm: { min: 0, max: 400, label: '要求后截距（mm）' },
+  focalLengthMm: { min: 50, max: 5000, label: '主镜焦距（mm）' },
+  pixelSizeUm: { min: 1, max: 20, label: '相机像元（μm）' },
+  guideFocalLengthMm: { min: 50, max: 2000, label: '导星焦距（mm）' },
+  guidePixelSizeUm: { min: 1, max: 20, label: '导星像元（μm）' },
+  weightG: { min: 0, max: 50000, label: '重量（g）' }
+};
+
+export function threadLabel(code) {
+  return THREADS[code]?.label ?? code;
+}
+
+/** 上游后接口与下游前接口是否可直接对接 */
+export function threadsMatch(rearCode, frontCode) {
+  const rear = THREADS[rearCode];
+  const front = THREADS[frontCode];
+  if (!rear || !front) return false;
+  if (rear.gender === 'N' || front.gender === 'N') return false;
+  if (rear.size !== front.size) return false;
+  if (rear.gender === 'B' || front.gender === 'B') return rear.gender === 'B' && front.gender === 'B';
+  return rear.gender !== front.gender;
+}
+
+function readThread(body, name, { allowNone = false, label }) {
+  const raw = body?.[name];
+  if (raw === undefined || raw === null || raw === '') {
+    if (allowNone) return 'NONE';
+    throw new ValidationError(`缺少参数「${label}」`);
+  }
+  const code = String(raw).trim().toUpperCase();
+  if (!THREADS[code] || (!allowNone && code === 'NONE')) {
+    throw new ValidationError(`参数「${label}」不是受支持的接口规格：${String(raw).slice(0, 20)}`);
+  }
+  return code;
+}
+
+/** 校验单件器材，返回规范化的 item；类型决定必填字段 */
+export function normalizeItem(raw, index = 0) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ValidationError(`第 ${index + 1} 件器材必须是对象`);
+  }
+  const type = String(raw.type ?? '').trim();
+  if (!ITEM_TYPES[type]) {
+    throw new ValidationError(`第 ${index + 1} 件器材的类型无效（应为 ${Object.keys(ITEM_TYPES).join('/')}）`);
+  }
+  const name =
+    typeof raw.name === 'string' && raw.name.trim()
+      ? raw.name.trim().slice(0, 30)
+      : `${ITEM_TYPES[type].label} ${index + 1}`;
+  const at = (label) => `「${name}」${label}`;
+  const item = {
+    type,
+    name,
+    weightG: numberField(raw, 'weightG', { ...TRAIN_LIMITS.weightG, label: at('重量（g）') })
+  };
+
+  if (type === 'ota') {
+    item.focalLengthMm = numberField(raw, 'focalLengthMm', {
+      ...TRAIN_LIMITS.focalLengthMm,
+      label: at('焦距（mm）')
+    });
+    item.requiredBackfocusMm = numberField(raw, 'requiredBackfocusMm', {
+      ...TRAIN_LIMITS.requiredBackfocusMm,
+      label: at('要求后截距（mm）')
+    });
+    item.threadFront = 'NONE';
+    item.threadRear = readThread(raw, 'threadRear', { label: at('后端接口') });
+  } else if (type === 'camera') {
+    item.lengthMm = numberField(raw, 'lengthMm', { ...TRAIN_LIMITS.lengthMm, label: at('法兰距（mm）') });
+    item.pixelSizeUm = numberField(raw, 'pixelSizeUm', {
+      ...TRAIN_LIMITS.pixelSizeUm,
+      label: at('像元（μm）')
+    });
+    item.threadFront = readThread(raw, 'threadFront', { label: at('前端接口') });
+    item.threadRear = 'NONE';
+  } else if (type === 'guider') {
+    item.guideFocalLengthMm = numberField(raw, 'guideFocalLengthMm', {
+      ...TRAIN_LIMITS.guideFocalLengthMm,
+      label: at('导星焦距（mm）')
+    });
+    item.guidePixelSizeUm = numberField(raw, 'guidePixelSizeUm', {
+      ...TRAIN_LIMITS.guidePixelSizeUm,
+      label: at('导星像元（μm）')
+    });
+    item.threadFront = 'NONE';
+    item.threadRear = 'NONE';
+  } else {
+    item.lengthMm = numberField(raw, 'lengthMm', { ...TRAIN_LIMITS.lengthMm, label: at('占位长度（mm）') });
+    item.threadFront = readThread(raw, 'threadFront', { label: at('前端接口') });
+    item.threadRear = readThread(raw, 'threadRear', { label: at('后端接口') });
+  }
+  return item;
+}
+
+/** 把缺口毫米数（向下取到 0.5）拆成标准转接环组合，返回 [{thicknessMm, count}] 与余量 */
+export function suggestSpacers(gapMm) {
+  const target = Math.floor(gapMm * 2 + 1e-9) / 2;
+  let rest = Math.round(target * 10); // 0.1mm 整数运算，避免浮点误差
+  const spacers = [];
+  for (const size of SPACER_SIZES_MM) {
+    const unit = Math.round(size * 10);
+    const count = Math.floor(rest / unit);
+    if (count > 0) {
+      spacers.push({ thicknessMm: size, count });
+      rest -= count * unit;
+    }
+  }
+  const spacerTotalMm = roundTo(target, 1);
+  return {
+    spacers,
+    spacerTotalMm,
+    residualMm: roundTo(gapMm - spacerTotalMm, 2)
+  };
+}
+
+function guideReport(ota, camera, guider) {
+  if (!guider) return null;
+  const mainScale = pixelScaleArcsec(ota.focalLengthMm, camera.pixelSizeUm);
+  const guideScale = pixelScaleArcsec(guider.guideFocalLengthMm, guider.guidePixelSizeUm);
+  const ratio = guideScale / mainScale;
+  let level = '偏大';
+  if (ratio <= 2) level = '充裕';
+  else if (ratio <= 4) level = '可用';
+  const note =
+    level === '充裕'
+      ? '导星像素尺度足够细，修正精度充裕。'
+      : level === '可用'
+        ? '处于常见可用区间，导星修正精度一般够用。'
+        : '导星像素尺度偏粗，建议换更长焦距的导星镜或更小像元的导星相机。';
+  return {
+    mainScaleArcsec: roundTo(mainScale, 3),
+    guideScaleArcsec: roundTo(guideScale, 3),
+    ratio: roundTo(ratio, 2),
+    level,
+    note
+  };
+}
+
+/**
+ * 器材齐套校核：光路长度累加 vs 主镜要求后截距，接口逐节匹配，总重 vs 载重余量。
+ * 结构性问题（缺主镜/相机、顺序错误）抛 ValidationError；
+ * 接口不匹配、超长、超重作为 problems 返回，由页面展示。
+ */
+export function chainReport(input) {
+  const { payloadMarginKg, items } = input;
+  const chain = items.filter((item) => ITEM_TYPES[item.type].chain);
+  const guider = items.find((item) => item.type === 'guider');
+
+  const otaCount = chain.filter((item) => item.type === 'ota').length;
+  const cameraCount = chain.filter((item) => item.type === 'camera').length;
+  if (otaCount !== 1) throw new ValidationError('器材清单里需要且只能有一件主镜');
+  if (cameraCount !== 1) throw new ValidationError('器材清单里需要且只能有一台相机');
+  if (chain[0].type !== 'ota') throw new ValidationError('主镜必须排在光路最前');
+  if (chain[chain.length - 1].type !== 'camera') throw new ValidationError('相机必须排在光路末端');
+
+  const ota = chain[0];
+  const camera = chain[chain.length - 1];
+  const problems = [];
+
+  // 逐节接口匹配 + 链路长度累加
+  let cumulativeMm = 0;
+  const rows = chain.map((item, index) => {
+    const lengthMm = item.type === 'ota' ? 0 : item.lengthMm;
+    let joint = null;
+    if (index > 0) {
+      const prev = chain[index - 1];
+      const ok = threadsMatch(prev.threadRear, item.threadFront);
+      joint = {
+        ok,
+        detail: `${threadLabel(prev.threadRear)} ↔ ${threadLabel(item.threadFront)}`
+      };
+      if (!ok) {
+        problems.push({
+          code: 'thread-mismatch',
+          message: `第 ${index} 节「${prev.name}」后端（${threadLabel(prev.threadRear)}）与「${item.name}」前端（${threadLabel(item.threadFront)}）接不上，需要换转接环或改接口。`
+        });
+      }
+    }
+    cumulativeMm = roundTo(cumulativeMm + lengthMm, 2);
+    return {
+      name: item.name,
+      type: item.type,
+      typeLabel: ITEM_TYPES[item.type].label,
+      lengthMm,
+      cumulativeMm,
+      joint
+    };
+  });
+
+  const totalLengthMm = cumulativeMm;
+  const gapMm = roundTo(ota.requiredBackfocusMm - totalLengthMm, 2);
+
+  let focus;
+  if (Math.abs(gapMm) < FOCUS_TRAVEL_TOLERANCE_MM) {
+    // 两个方向对称：偏差不足 0.5 mm 一律由调焦行程吸收
+    focus = { status: 'exact', spacers: [], spacerTotalMm: 0, residualMm: 0 };
+  } else if (gapMm > 0) {
+    focus = { status: 'need-spacer', ...suggestSpacers(gapMm) };
+  } else {
+    focus = { status: 'over-length', spacers: [], spacerTotalMm: 0, residualMm: 0 };
+    problems.push({
+      code: 'over-length',
+      message: `链路总长 ${totalLengthMm} mm，超出要求后截距 ${roundTo(-gapMm, 2)} mm，加转接环无法解决，需要减薄部件或缩短调焦座占位。`
+    });
+  }
+
+  // 重量：全部器材（含导星设备）都压在赤道仪上
+  const totalWeightG = roundTo(
+    items.reduce((sum, item) => sum + item.weightG, 0),
+    1
+  );
+  const marginG = roundTo(payloadMarginKg * 1000, 1);
+  const weightOk = totalWeightG <= marginG;
+  if (!weightOk) {
+    problems.push({
+      code: 'overweight',
+      message: `整套器材 ${(totalWeightG / 1000).toFixed(2)} kg，超出赤道仪载重余量 ${roundTo((totalWeightG - marginG) / 1000, 2)} kg。`
+    });
+  }
+
+  return {
+    chain: rows,
+    requiredBackfocusMm: ota.requiredBackfocusMm,
+    totalLengthMm,
+    gapMm,
+    focus,
+    weight: {
+      totalG: totalWeightG,
+      marginG,
+      ok: weightOk,
+      excessG: weightOk ? 0 : roundTo(totalWeightG - marginG, 1)
+    },
+    guide: guideReport(ota, camera, guider),
+    problems,
+    ok: problems.length === 0
+  };
+}
+
+/** 服务端入口：校验请求体并输出报告 */
+export function readTrainInput(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new ValidationError('请求体必须是 JSON 对象');
+  }
+  if (!Array.isArray(body.items) || body.items.length < 2) {
+    throw new ValidationError('器材清单至少需要 2 件（主镜 + 相机）');
+  }
+  if (body.items.length > 12) {
+    throw new ValidationError('器材清单不能超过 12 件');
+  }
+  return {
+    payloadMarginKg: numberField(body, 'payloadMarginKg', TRAIN_LIMITS.payloadMarginKg),
+    items: body.items.map((raw, index) => normalizeItem(raw, index))
+  };
+}

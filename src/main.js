@@ -6,15 +6,18 @@ import {
   postOptics,
   postSchedule,
   postTracking,
+  postTrain,
   postVisibility,
   removeTarget
 } from './api.js';
+import { ITEM_TYPES, THREADS } from './train.js';
 import { setLastReport, setTargets } from './state.js';
 import { renderExposurePanel } from './components/exposure-panel.js';
 import { renderOpticsPanel } from './components/optics-panel.js';
 import { renderSchedulePanel } from './components/schedule-panel.js';
 import { renderTargetList } from './components/target-library.js';
 import { renderTrackingPanel } from './components/tracking-panel.js';
+import { renderTrainPanel } from './components/train-panel.js';
 import { renderVisibilityPanel } from './components/visibility-panel.js';
 import { escapeHtml } from './components/metrics.js';
 
@@ -44,7 +47,8 @@ const DEFAULTS = {
   trkSeeing: 2,
   trackingRms: 0.6,
   trkPixelScale: 1.94,
-  trkSubExposure: 300
+  trkSubExposure: 300,
+  trainMargin: 6
 };
 
 const FIELDS = {
@@ -76,6 +80,7 @@ const FIELDS = {
   trkSubExposure: 'trk-sub-exposure',
   schedTargetSwitch: 'sched-target-switch',
   schedFilterSwitch: 'sched-filter-switch',
+  trainMargin: 'train-margin',
   targetName: 'target-name-input',
   targetRaInput: 'target-ra-input',
   targetDecInput: 'target-dec-input',
@@ -101,12 +106,17 @@ function cacheElements() {
   elements.schedAddRow = document.getElementById('sched-add-row');
   elements.schedRun = document.getElementById('sched-run');
   elements.schedMessage = document.getElementById('sched-message');
+  elements.trainRows = document.getElementById('train-item-rows');
+  elements.trainAddRow = document.getElementById('train-add-row');
+  elements.trainRun = document.getElementById('train-run');
+  elements.trainMessage = document.getElementById('train-message');
   elements.panels = {
     optics: document.getElementById('optics-panel'),
     exposure: document.getElementById('exposure-panel'),
     visibility: document.getElementById('visibility-panel'),
     tracking: document.getElementById('tracking-panel'),
-    schedule: document.getElementById('schedule-panel')
+    schedule: document.getElementById('schedule-panel'),
+    train: document.getElementById('train-panel')
   };
 }
 
@@ -293,6 +303,169 @@ async function runSchedule() {
   }
 }
 
+/* ===== 器材齐套 ===== */
+
+// 每种器材类型的动态字段；thread=true 渲染接口下拉，其余为数字输入
+const TRAIN_TYPE_FIELDS = {
+  ota: [
+    { key: 'focalLengthMm', label: '焦距 mm', step: 1 },
+    { key: 'requiredBackfocusMm', label: '要求后截距 mm', step: 0.5 },
+    { key: 'threadRear', label: '后端接口', thread: true },
+    { key: 'weightG', label: '重量 g', step: 1 }
+  ],
+  focuser: [
+    { key: 'lengthMm', label: '占位长度 mm', step: 0.5 },
+    { key: 'threadFront', label: '前端接口', thread: true },
+    { key: 'threadRear', label: '后端接口', thread: true },
+    { key: 'weightG', label: '重量 g', step: 1 }
+  ],
+  filterWheel: [
+    { key: 'lengthMm', label: '厚度 mm', step: 0.5 },
+    { key: 'threadFront', label: '前端接口', thread: true },
+    { key: 'threadRear', label: '后端接口', thread: true },
+    { key: 'weightG', label: '重量 g', step: 1 }
+  ],
+  adapter: [
+    { key: 'lengthMm', label: '厚度 mm', step: 0.5 },
+    { key: 'threadFront', label: '前端接口', thread: true },
+    { key: 'threadRear', label: '后端接口', thread: true },
+    { key: 'weightG', label: '重量 g', step: 1 }
+  ],
+  camera: [
+    { key: 'lengthMm', label: '法兰距 mm', step: 0.5 },
+    { key: 'pixelSizeUm', label: '像元 μm', step: 0.01 },
+    { key: 'threadFront', label: '前端接口', thread: true },
+    { key: 'weightG', label: '重量 g', step: 1 }
+  ],
+  guider: [
+    { key: 'guideFocalLengthMm', label: '导星焦距 mm', step: 1 },
+    { key: 'guidePixelSizeUm', label: '导星像元 μm', step: 0.01 },
+    { key: 'weightG', label: '重量 g', step: 1 }
+  ]
+};
+
+const TRAIN_TYPE_DEFAULTS = {
+  ota: { focalLengthMm: 400, requiredBackfocusMm: 80, threadRear: 'M48F', weightG: 2600 },
+  focuser: { lengthMm: 35, threadFront: 'M48M', threadRear: 'M48F', weightG: 800 },
+  filterWheel: { lengthMm: 20, threadFront: 'M48M', threadRear: 'M48F', weightG: 500 },
+  adapter: { lengthMm: 5, threadFront: 'M48M', threadRear: 'M48F', weightG: 50 },
+  camera: { lengthMm: 17.5, pixelSizeUm: 3.76, threadFront: 'M48M', weightG: 650 },
+  guider: { guideFocalLengthMm: 120, guidePixelSizeUm: 3.75, weightG: 400 }
+};
+
+const TRAIN_DEFAULT_ROWS = [
+  { type: 'ota', name: '80ED 主镜' },
+  { type: 'focuser', name: '调焦座' },
+  { type: 'filterWheel', name: '滤镜轮' },
+  { type: 'camera', name: '冷冻相机' },
+  { type: 'guider', name: '导星套装' }
+];
+
+const THREAD_SELECT_OPTIONS = Object.entries(THREADS)
+  .filter(([code]) => code !== 'NONE')
+  .map(([code, info]) => [code, info.label]);
+
+function threadOptions(selected) {
+  return THREAD_SELECT_OPTIONS.map(
+    ([code, label]) => `<option value="${code}"${code === selected ? ' selected' : ''}>${label}</option>`
+  ).join('');
+}
+
+function trainRowValues(row) {
+  const values = {};
+  for (const input of row.querySelectorAll('[data-field]')) {
+    values[input.dataset.field] = input.value;
+  }
+  return values;
+}
+
+function renderTrainRowFields(row, values) {
+  const type = row.querySelector('[data-field="type"]').value;
+  const defaults = TRAIN_TYPE_DEFAULTS[type] ?? {};
+  const fields = row.querySelector('.train-row__fields');
+  fields.innerHTML = TRAIN_TYPE_FIELDS[type]
+    .map((field) => {
+      const value = values[field.key] ?? defaults[field.key] ?? '';
+      if (field.thread) {
+        return `<select data-field="${field.key}" title="${field.label}">${threadOptions(value)}</select>`;
+      }
+      return `<input data-field="${field.key}" type="number" min="0" step="${field.step}" placeholder="${field.label}" title="${field.label}" value="${escapeHtml(value)}" />`;
+    })
+    .join('');
+}
+
+function addTrainRow(values = {}) {
+  const row = document.createElement('div');
+  row.className = 'train-row';
+  const typeOptions = Object.entries(ITEM_TYPES)
+    .map(
+      ([type, info]) =>
+        `<option value="${type}"${type === (values.type ?? 'adapter') ? ' selected' : ''}>${info.label}</option>`
+    )
+    .join('');
+  row.innerHTML = `
+    <div class="train-row__head">
+      <select data-field="type" title="器材类型">${typeOptions}</select>
+      <input data-field="name" type="text" maxlength="30" placeholder="器材名称" value="${escapeHtml(values.name ?? '')}" />
+      <button type="button" class="ghost train-row__remove" title="删除该器材">✕</button>
+    </div>
+    <div class="train-row__fields"></div>`;
+
+  row.querySelector('[data-field="type"]').addEventListener('change', () => {
+    renderTrainRowFields(row, trainRowValues(row));
+  });
+  row.querySelector('.train-row__remove').addEventListener('click', () => {
+    if (elements.trainRows.children.length > 1) row.remove();
+  });
+  elements.trainRows.appendChild(row);
+  renderTrainRowFields(row, values);
+  return row;
+}
+
+function collectTrain() {
+  const items = [...elements.trainRows.querySelectorAll('.train-row')].map((row) => {
+    const raw = trainRowValues(row);
+    const item = { type: raw.type, name: raw.name.trim() };
+    for (const field of TRAIN_TYPE_FIELDS[raw.type] ?? []) {
+      item[field.key] = field.thread ? raw[field.key] : raw[field.key] === '' ? NaN : Number(raw[field.key]);
+    }
+    return item;
+  });
+  return { payloadMarginKg: numberValue('trainMargin'), items };
+}
+
+function setTrainMessage(text, tone = 'hint') {
+  elements.trainMessage.textContent = text;
+  elements.trainMessage.className = tone;
+}
+
+async function runTrain() {
+  const payload = collectTrain();
+  if (payload.items.length < 2) {
+    setTrainMessage('至少需要主镜和相机两件器材。', 'error');
+    return;
+  }
+
+  elements.trainRun.disabled = true;
+  setTrainMessage('正在校核器材链路…');
+  try {
+    const report = await postTrain(payload);
+    renderTrainPanel(elements.panels.train, report);
+    elements.panels.train.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (!report.ok) {
+      setTrainMessage(`校核发现 ${report.problems.length} 个问题，请查看面板。`, 'error');
+    } else if (report.focus.status === 'need-spacer') {
+      setTrainMessage('链路可接、载重合格，但还差一截才能合焦，转接环组合见面板。', 'hint');
+    } else {
+      setTrainMessage('器材齐套：链路可接、正好合焦、载重合格。', 'ok');
+    }
+  } catch (error) {
+    setTrainMessage(`校核失败：${error.message}`, 'error');
+  } finally {
+    elements.trainRun.disabled = false;
+  }
+}
+
 function setStatus(text, tone) {
   elements.apiStatus.textContent = text;
   elements.apiStatus.className = `status status--${tone}`;
@@ -432,12 +605,15 @@ function bindEvents() {
   elements.targetAddButton.addEventListener('click', addCustomTarget);
   elements.schedAddRow.addEventListener('click', () => addScheduleRow());
   elements.schedRun.addEventListener('click', runSchedule);
+  elements.trainAddRow.addEventListener('click', () => addTrainRow());
+  elements.trainRun.addEventListener('click', runTrain);
 }
 
 async function init() {
   cacheElements();
   applyDefaults();
   for (const row of SCHEDULE_DEFAULTS_ROWS) addScheduleRow(row);
+  for (const row of TRAIN_DEFAULT_ROWS) addTrainRow(row);
   bindEvents();
   await Promise.all([refreshHealth(), refreshTargets()]);
 }

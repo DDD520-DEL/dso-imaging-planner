@@ -622,3 +622,74 @@ button.ghost {
   color: var(--muted);
   font-weight: 400;
 }
+
+/* ===== 器材齐套 ===== */
+.train-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.train-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  background: rgba(27, 35, 64, 0.45);
+}
+
+.train-row__head {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.4fr) 26px;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.train-row__fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+
+.train-row input,
+.train-row select {
+  padding: 6px 7px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.train-row__remove {
+  padding: 5px 0;
+  font-size: 12px;
+}
+
+.train-spacer {
+  border: 1px solid rgba(240, 180, 92, 0.45);
+  background: rgba(240, 180, 92, 0.08);
+  border-radius: 8px;
+  padding: 9px 12px;
+  margin: 10px 0;
+}
+
+.train-spacer p {
+  margin: 0 0 4px;
+}
+
+.train-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+.train-table th,
+.train-table td {
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  padding: 4px 8px;
+}
+
+.train-table th {
+  color: var(--muted);
+  font-weight: 400;
+}

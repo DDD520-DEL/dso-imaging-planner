@@ -179,6 +179,23 @@
             </div>
             <p id="sched-message" class="hint"></p>
           </fieldset>
+
+          <fieldset>
+            <legend>器材齐套（光路链路与载重）</legend>
+            <div class="field-row">
+              <label class="field">
+                <span>赤道仪载重余量（kg）</span>
+                <input id="train-margin" type="number" min="0" max="100" step="0.1" value="6" />
+              </label>
+            </div>
+            <p class="hint">按光路顺序排列：主镜在最前、相机在末端；导星设备不进光路，只计重量与导星采样比。</p>
+            <div id="train-item-rows" class="train-rows"></div>
+            <div class="actions">
+              <button id="train-add-row" type="button" class="ghost">+ 添加器材</button>
+              <button id="train-run" type="button">校核器材链路</button>
+            </div>
+            <p id="train-message" class="hint"></p>
+          </fieldset>
         </form>
 
         <div class="actions">
@@ -195,6 +212,7 @@
         <article id="visibility-panel" class="card" hidden></article>
         <article id="tracking-panel" class="card" hidden></article>
         <article id="schedule-panel" class="card" hidden></article>
+        <article id="train-panel" class="card" hidden></article>
       </section>
 
       <section class="panel panel--library">

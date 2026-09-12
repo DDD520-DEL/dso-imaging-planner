@@ -8,6 +8,7 @@ import { OPTICS_LIMITS, opticsReport } from './src/optics.js';
 import { SCHEDULE_DEFAULTS, SCHEDULE_LIMITS, scheduleNight } from './src/schedule.js';
 import { BUILTIN_TARGETS, normalizeTarget } from './src/targets.js';
 import { TRACKING_LIMITS, trackingReport } from './src/tracking.js';
+import { chainReport, readTrainInput } from './src/train.js';
 import { VISIBILITY_LIMITS, visibilityPlan } from './src/visibility.js';
 import { readTargetsFile, writeTargetsFile } from './src/store.js';
 import { ValidationError, numberField, requireBody } from './src/validate.js';
@@ -250,6 +251,11 @@ async function handleApi(request, response, url, dataFile) {
 
   if (method === 'POST' && pathname === '/api/schedule/plan') {
     sendJson(response, 200, scheduleNight(readScheduleInput(await readJsonBody(request))));
+    return;
+  }
+
+  if (method === 'POST' && pathname === '/api/train/check') {
+    sendJson(response, 200, chainReport(readTrainInput(await readJsonBody(request))));
     return;
   }
 

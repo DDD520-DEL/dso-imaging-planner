@@ -202,6 +202,58 @@ test('排程接口返回时间线与未排入清单，目标参数非法返回 4
   });
 });
 
+test('器材链路接口：合焦差额与转接环建议，结构非法返回 400', async () => {
+  await withServer(async (base) => {
+    const items = [
+      { type: 'ota', name: '主镜', focalLengthMm: 400, requiredBackfocusMm: 80, threadRear: 'M48F', weightG: 2600 },
+      { type: 'focuser', name: '调焦座', lengthMm: 35, threadFront: 'M48M', threadRear: 'M48F', weightG: 800 },
+      { type: 'filterWheel', name: '滤镜轮', lengthMm: 20, threadFront: 'M48M', threadRear: 'M48F', weightG: 500 },
+      { type: 'camera', name: '相机', lengthMm: 17.5, pixelSizeUm: 3.76, threadFront: 'M48M', weightG: 650 },
+      { type: 'guider', name: '导星套装', guideFocalLengthMm: 120, guidePixelSizeUm: 3.75, weightG: 400 }
+    ];
+
+    const ok = await postJson(base, '/api/train/check', { payloadMarginKg: 6, items });
+    assert.equal(ok.status, 200);
+    const report = await ok.json();
+    assert.equal(report.focus.status, 'need-spacer');
+    assert.equal(report.gapMm, 7.5);
+    assert.deepEqual(report.focus.spacers, [
+      { thicknessMm: 5, count: 1 },
+      { thicknessMm: 2, count: 1 },
+      { thicknessMm: 0.5, count: 1 }
+    ]);
+    assert.equal(report.ok, true);
+    assert.equal(report.weight.totalG, 4950);
+    assert.equal(report.guide.ratio, 3.32);
+    assert.equal(report.chain.length, 4);
+
+    // 超重与接口不匹配作为结果返回（200），不是请求错误
+    const problematic = await postJson(base, '/api/train/check', {
+      payloadMarginKg: 3,
+      items: items.map((item, index) => (index === 2 ? { ...item, threadRear: 'M48M' } : item))
+    });
+    assert.equal(problematic.status, 200);
+    const problemReport = await problematic.json();
+    assert.equal(problemReport.ok, false);
+    assert.deepEqual(
+      problemReport.problems.map((p) => p.code).sort(),
+      ['overweight', 'thread-mismatch']
+    );
+
+    // 结构性问题（缺相机）与字段越界返回 400
+    const noCamera = await postJson(base, '/api/train/check', { payloadMarginKg: 6, items: items.slice(0, 3) });
+    assert.equal(noCamera.status, 400);
+    assert.match((await noCamera.json()).error, /相机/);
+
+    const badField = await postJson(base, '/api/train/check', {
+      payloadMarginKg: 6,
+      items: items.map((item, index) => (index === 0 ? { ...item, focalLengthMm: 10 } : item))
+    });
+    assert.equal(badField.status, 400);
+    assert.match((await badField.json()).error, /焦距/);
+  });
+});
+
 test('错误处理：坏 JSON 返回 400，未知接口返回 404', async () => {
   await withServer(async (base) => {
     const brokenJson = await fetch(`${base}/api/tracking/check`, {

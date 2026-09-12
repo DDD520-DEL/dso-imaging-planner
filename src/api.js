@@ -30,3 +30,4 @@ export const postExposure = (payload) => request('/api/exposure/estimate', { met
 export const postVisibility = (payload) => request('/api/visibility/plan', { method: 'POST', body: payload });
 export const postTracking = (payload) => request('/api/tracking/check', { method: 'POST', body: payload });
 export const postSchedule = (payload) => request('/api/schedule/plan', { method: 'POST', body: payload });
+export const postTrain = (payload) => request('/api/train/check', { method: 'POST', body: payload });
